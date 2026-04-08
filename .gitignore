@@ -1,0 +1,10 @@
+# env
+app/.env.local
+
+# node
+node_modules/
+app/node_modules/
+
+# expo
+app/.expo/
+app/dist/
