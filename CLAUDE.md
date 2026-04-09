@@ -44,6 +44,13 @@ invest-dashboard/
 │       ├── 06-fe-review.md
 │       └── 07-test-results.md
 └── app/                 # React Native (Expo) 앱 — 실제 코드
+    ├── services/        # Supabase API 호출 (도메인별, 예: auth.ts, portfolio.ts)
+    ├── hooks/           # 커스텀 훅
+    ├── screens/         # 화면 컴포넌트
+    ├── components/      # 공통 컴포넌트
+    ├── types/           # 공통 타입
+    └── supabase/
+        └── migrations/  # DB 마이그레이션 SQL
 ```
 
 ## 에이전트 워크플로우

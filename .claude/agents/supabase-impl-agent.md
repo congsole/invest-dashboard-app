@@ -64,8 +64,8 @@ serve(async (req) => {
 })
 ```
 
-#### 3-3. 클라이언트 유틸 함수
-`app/utils/{domain}.ts` 파일에 작성 (기존 파일이 있으면 추가, 없으면 생성).
+#### 3-3. 클라이언트 서비스 함수
+`app/services/{domain}.ts` 파일에 작성 (기존 파일이 있으면 추가, 없으면 생성).
 
 ```typescript
 import { supabase } from './supabase'
@@ -86,7 +86,28 @@ export async function {functionName}({params}: {ParamType}): Promise<{ReturnType
 - 타입은 명시적으로 정의 (`interface` 또는 `type`)
 - `any` 사용 금지
 
-### 4. issue.md 구현 현황 업데이트
+### 4. 마이그레이션 DB 적용
+
+마이그레이션 SQL 파일 작성 후 아래 명령어로 실제 Supabase DB에 적용한다:
+
+```bash
+cd app
+supabase db push
+```
+
+실행 전 `app/` 디렉토리에서 Supabase CLI가 프로젝트에 링크되어 있어야 한다.
+링크가 안 되어 있으면 아래 명령어로 먼저 설정한다:
+
+```bash
+supabase login
+supabase link --project-ref {project-ref}  # Supabase 대시보드 URL에서 확인
+```
+
+`supabase db push` 실패 시:
+- 에러 메시지를 읽고 SQL 수정 후 재시도
+- 해결 불가 시 사용자에게 에러 내용과 함께 escalate
+
+### 5. issue.md 구현 현황 업데이트
 
 `issues/{NNN}-{slug}/issue.md` 의 구현 현황을 업데이트한다:
 
@@ -97,7 +118,7 @@ export async function {functionName}({params}: {ParamType}): Promise<{ReturnType
 - [ ] 테스트
 ```
 
-### 5. issues/ 산출물 기록
+### 6. issues/ 산출물 기록
 
 `issues/{NNN}-{slug}/04-supabase-impl.md` 를 작성한다:
 
@@ -111,7 +132,7 @@ export async function {functionName}({params}: {ParamType}): Promise<{ReturnType
 - `app/supabase/functions/{name}/` (해당 시)
 
 ## 클라이언트 유틸
-- `app/utils/{domain}.ts` — {구현된 함수 목록}
+- `app/services/{domain}.ts` — {구현된 함수 목록}
 
 ## 특이사항
 구현 중 발견한 이슈, 결정 사항 등
@@ -120,8 +141,9 @@ export async function {functionName}({params}: {ParamType}): Promise<{ReturnType
 ## 완료 조건
 
 - 마이그레이션 SQL 작성 완료
+- `supabase db push` 실행 완료 (DB 반영)
 - RPC가 필요한 경우 Edge Function 작성 완료
-- 모든 API가 클라이언트 유틸 함수로 구현됨
+- 모든 API가 클라이언트 서비스 함수로 구현됨
 - TypeScript 타입 에러 없음
 - `04-supabase-impl.md` 작성 완료
 - 완료 후 작성된 파일 목록을 출력한다
