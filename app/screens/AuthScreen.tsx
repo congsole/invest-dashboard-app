@@ -14,6 +14,11 @@ import { signIn, signUp } from '../services/auth';
 
 type Tab = 'login' | 'signup';
 
+interface AuthScreenProps {
+  /** 회원가입 후 이메일 인증 대기 상태로 전환 시 호출 */
+  onSignupPendingVerification: (email: string, nickname: string) => void;
+}
+
 // ────────────────────────────────────────────
 // 유효성 검사
 // ────────────────────────────────────────────
@@ -53,6 +58,9 @@ function parseAuthError(error: unknown): string {
     if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) {
       return '이메일 또는 비밀번호가 올바르지 않습니다';
     }
+    if (msg.includes('Email not confirmed') || msg.includes('email_not_confirmed')) {
+      return '이메일 인증이 필요합니다. 이메일을 확인해주세요';
+    }
     if (msg.includes('network') || msg.includes('fetch')) {
       return '네트워크 오류가 발생했습니다. 다시 시도해주세요';
     }
@@ -65,7 +73,7 @@ function parseAuthError(error: unknown): string {
 // AuthScreen
 // ────────────────────────────────────────────
 
-export function AuthScreen() {
+export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
   const [tab, setTab] = useState<Tab>('login');
 
   // 로그인 상태
@@ -117,8 +125,16 @@ export function AuthScreen() {
 
     setSignupLoading(true);
     try {
-      await signUp({ email: signupEmail, password: signupPassword, nickname: signupNickname });
-      // 성공 시 useAuth 훅이 상태를 업데이트하여 App.tsx에서 화면 전환
+      const { needsEmailVerification } = await signUp({
+        email: signupEmail,
+        password: signupPassword,
+      });
+
+      if (needsEmailVerification) {
+        // 이메일 인증 대기 화면으로 이동, 닉네임 임시 보관
+        onSignupPendingVerification(signupEmail, signupNickname);
+      }
+      // needsEmailVerification === false 이면 onAuthStateChange가 SIGNED_IN을 처리
     } catch (error) {
       setSignupError(parseAuthError(error));
     } finally {

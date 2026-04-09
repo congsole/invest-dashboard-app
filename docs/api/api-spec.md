@@ -46,11 +46,11 @@
 
 ### 프로필 생성 (Create Profile)
 
-회원가입 직후 호출하여 닉네임을 저장한다.
+이메일 인증 완료 후(`SIGNED_IN` 이벤트 수신 시) 호출하여 닉네임을 저장한다.
 
 - **방식**: REST (auto-generated)
 - **호출**: `supabase.from('profiles').insert({ user_id, nickname })`
-- **인증**: 필요 (회원가입 직후 세션 사용)
+- **인증**: 필요 (이메일 인증 완료 후 세션 사용)
 
 **요청 파라미터**
 | 파라미터 | 타입 | 필수 | 설명 |
@@ -158,6 +158,33 @@
 
 ---
 
+### 인증 이메일 재발송 (Resend Verification Email)
+
+이메일 인증 대기 화면에서 인증 메일을 재발송한다.
+
+- **방식**: Supabase Auth SDK
+- **호출**: `supabase.auth.resend({ type: 'signup', email })`
+- **인증**: 불필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| email | string | Y | 재발송할 이메일 주소 |
+
+**응답**
+```typescript
+{ error: null }
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | 이메일 형식 오류 |
+| 429 | Supabase 발송 제한 초과 |
+| 네트워크 오류 | 오프라인 상태 |
+
+---
+
 ### 세션 상태 변경 구독 (Auth State Change)
 
 인증 상태 변화(로그인, 로그아웃, 세션 만료)를 실시간으로 감지한다.
@@ -180,3 +207,4 @@
 | 이슈 | 변경 내용 |
 |------|----------|
 | [001] 사용자 인증 | Auth 도메인 추가 (signup, createProfile, signIn, signOut, getSession, onAuthStateChange) |
+| [002] 이메일 인증 플로우 | Auth — resendVerificationEmail 추가. createProfile 호출 시점을 이메일 인증 완료 후로 명확화. |

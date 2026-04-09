@@ -37,3 +37,4 @@ auth.users ||--|| profiles : "1:1 (user_id FK)"
 | 이슈 | 변경 내용 |
 |------|----------|
 | [001] 사용자 인증 | profiles 테이블 추가. auth.users는 Supabase Auth 관리. |
+| [002] 이메일 인증 플로우 | DB 스키마 변경 없음. 재발송 쿨다운은 클라이언트 state로 관리. |

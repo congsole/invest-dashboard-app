@@ -7,7 +7,10 @@ import { supabase } from '../utils/supabase';
 export interface SignUpParams {
   email: string;
   password: string;
-  nickname: string;
+}
+
+export interface ResendVerificationEmailParams {
+  email: string;
 }
 
 export interface SignInParams {
@@ -33,9 +36,11 @@ export interface AuthUser {
 // ────────────────────────────────────────────
 
 /**
- * 회원가입: Supabase Auth에 계정을 생성하고, profiles 테이블에 닉네임을 저장한다.
+ * 회원가입: Supabase Auth에 계정을 생성한다.
+ * 이메일 인증이 필요하므로 session은 null로 반환된다.
+ * 닉네임은 이메일 인증 완료(SIGNED_IN 이벤트) 후 createProfile로 저장한다.
  */
-export async function signUp({ email, password, nickname }: SignUpParams): Promise<AuthUser> {
+export async function signUp({ email, password }: SignUpParams): Promise<{ user: AuthUser; needsEmailVerification: boolean }> {
   const { data, error } = await supabase.auth.signUp({ email, password });
 
   if (error) {
@@ -46,23 +51,29 @@ export async function signUp({ email, password, nickname }: SignUpParams): Promi
     throw new Error('회원가입에 실패했습니다.');
   }
 
-  // profiles 테이블에 닉네임 저장
-  // 실패 시 auth 계정도 롤백 (onAuthStateChange로 인한 조기 화면 전환 방지)
-  try {
-    await createProfile({ userId: data.user.id, nickname });
-  } catch (profileError) {
-    await supabase.auth.signOut();
-    throw profileError;
-  }
-
   return {
-    id: data.user.id,
-    email: data.user.email ?? email,
+    user: {
+      id: data.user.id,
+      email: data.user.email ?? email,
+    },
+    // session이 null이면 이메일 인증 대기 상태
+    needsEmailVerification: data.session === null,
   };
 }
 
 /**
- * 프로필 생성: 회원가입 직후 profiles 테이블에 닉네임을 저장한다.
+ * 인증 이메일 재발송: 이메일 인증 대기 중 재발송 요청.
+ */
+export async function resendVerificationEmail({ email }: ResendVerificationEmailParams): Promise<void> {
+  const { error } = await supabase.auth.resend({ type: 'signup', email });
+
+  if (error) {
+    throw error;
+  }
+}
+
+/**
+ * 프로필 생성: 이메일 인증 완료(SIGNED_IN 이벤트) 후 profiles 테이블에 닉네임을 저장한다.
  */
 export async function createProfile({
   userId,

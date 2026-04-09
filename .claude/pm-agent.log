@@ -1,7 +1,11 @@
-PM-agent 실행 결과:
+이슈가 생성되었습니다.
 
-- **새 이슈 생성 없음** — `f3afd9e`의 세션 비기능 요구사항 추가는 이슈 001 범위 내 변경으로 판단
-- **이슈 001 업데이트** — `issues/001-user-authentication/issue.md`에 다중 기기 로그인 허용 및 세션 만료 자동 이동 동작 반영, `f3afd9e` 커밋을 참조 문서에 추가
-- `583d833`, `1cbc1fe` (hook 테스트 커밋) — 무시
+**`issues/002-email-verification-flow/issue.md`** 생성 완료
 
-현재 이슈는 `001-user-authentication` 하나이며 구현 단계로 진행할 준비가 되어 있습니다.
+주요 내용:
+- `EmailVerificationScreen` 구현 (안내 문구, 재발송 버튼 60초 쿨다운, 로그인 복귀 버튼)
+- 회원가입 후 닉네임 임시 보관 → `SIGNED_IN` 이벤트 수신 시 프로필 저장
+- `expo-linking` 및 `app.json` scheme 설정 (`investdashboard://`)
+- 이메일 미인증 로그인 에러 처리
+
+다음 단계로 파이프라인을 계속 진행할까요? (`domain-model-agent` → `db-schema-agent` → `api-spec-agent` → 병렬 구현)
