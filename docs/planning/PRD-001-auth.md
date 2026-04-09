@@ -99,3 +99,5 @@ Supabase Auth가 인증을 담당하므로 `auth.users` 테이블은 Supabase가
 - 비밀번호 평문 저장 금지 (Supabase Auth에 위임)
 - `profiles` 테이블은 본인 데이터만 조회/수정 가능 (RLS)
 - 네트워크 오류 시 적절한 에러 메시지 표시
+- 다중 기기 로그인 허용 (기존 세션 유지, Supabase Auth 기본 동작)
+- 세션 만료 시 자동으로 로그인 화면으로 이동
