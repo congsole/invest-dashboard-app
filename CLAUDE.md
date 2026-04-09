@@ -23,9 +23,118 @@
 ```
 invest-dashboard/
 ├── CLAUDE.md
-├── docs/           # 기획 문서, API 명세 등
-└── app/            # React Native (Expo) 앱
+├── docs/
+│   ├── planning/        # 기획서 (변경 시 이슈 생성 트리거)
+│   ├── design/
+│   │   └── DESIGN.md    # UI 설계 설명 (변경 시 이슈 생성 트리거)
+│   ├── architecture/
+│   │   ├── domain-model.md   # 공통 도메인 모델 (이슈마다 누적 업데이트)
+│   │   └── db-schema.md      # 공통 DB 스키마 (이슈마다 누적 업데이트)
+│   └── api/
+│       └── api-spec.md       # 공통 API 명세 (이슈마다 누적 업데이트)
+├── ui/                  # UI 레퍼런스 파일 (HTML, CSS)
+│   └── {기능명}/
+│       ├── index.html
+│       └── style.css
+├── issues/
+│   └── {NNN}-{issue-title}/
+│       ├── issue.md          # 이슈 정의 + docs 변경 내역
+│       ├── 04-supabase-impl.md
+│       ├── 05-be-review.md
+│       ├── 06-fe-review.md
+│       └── 07-test-results.md
+└── app/                 # React Native (Expo) 앱 — 실제 코드
+```
+
+## 에이전트 워크플로우
+
+### 트리거
+`docs/planning/` 또는 `docs/design/` 에 변경이 생기면 PM 에이전트가 실행되어 `issues/` 에 이슈를 생성한다.
+
+### 파이프라인
+```
+[docs/planning/ 또는 docs/design/ 커밋]
+  인풋: 커밋 메시지 + 변경된 기획서/디자인 파일
+        │
+        ▼
+    PM-agent
+    └─ issues/{NNN}-{title}/issue.md 생성 (이슈 번호 auto-increment)
+        │
+        ▼  인풋: issue.md
+  domain-model-agent  →  docs/architecture/domain-model.md 업데이트
+                         issue.md에 변경 내역 기록
+        │
+        ▼  인풋: issue.md + domain-model.md
+  db-schema-agent     →  docs/architecture/db-schema.md 업데이트
+                         issue.md에 변경 내역 기록
+        │
+        ▼  인풋: issue.md + domain-model.md + db-schema.md
+  api-spec-agent      →  docs/api/api-spec.md 업데이트
+                         issue.md에 변경 내역 기록
+        │
+        ├─────────────────────────────┐
+        ▼ (background)               ▼ (background, 병렬)
+  supabase-impl-agent          frontend-impl-agent
+  (쿼리 + RLS + Edge Fn)       인풋: issue.md + api-spec.md
+                               + docs/design/DESIGN.md
+                               + ui/{기능명}/*.html, *.css
+                               → RN/Expo 컴포넌트 구현
+        │                            │
+  [be review loop]            [fe review loop]
+        │                            │
+        └──────────────┬─────────────┘
+                       ▼
+                  e2e-test-agent
+```
+
+### 코드 리뷰 루프 규칙
+- initial review: 1회
+- fix → confirmation 사이클: 최대 3회
+- 3회 초과 시 미해결 이슈와 리뷰 로그를 사용자에게 escalate
+
+### docs vs issues 역할 분리
+- `docs/` — 항상 최신 상태의 단일 진실 원천 (domain model, API spec 등)
+- `issues/` — 이슈별 작업 로그, 구현 산출물, 리뷰 기록
+- 이슈 작업 시 docs 파일을 직접 수정하고, issue.md에 변경 내역을 기록
+
+### issue.md 형식
+
+각 섹션은 단계별 에이전트가 순차적으로 채운다.
+
+```markdown
+# [{NNN}] {이슈 제목}
+
+<!-- PM-agent 작성 -->
+## 개요
+커밋 메시지와 변경된 기획서/디자인 파일을 바탕으로 이슈 요약
+
+## 참조 문서
+- 커밋: {hash} — {커밋 메시지}
+- 기획서: docs/planning/{file}
+- 디자인: docs/design/{file} (해당 시)
+
+<!-- domain-model-agent 작성 후 추가 -->
+## docs 변경 내역
+
+### domain-model.md
+- [추가/수정/삭제] ...
+
+<!-- db-schema-agent 작성 후 추가 -->
+### db-schema.md
+- [추가/수정/삭제] ...
+
+<!-- api-spec-agent 작성 후 추가 -->
+### api-spec.md
+- [추가/수정/삭제] ...
+
+<!-- 구현 단계에서 업데이트 -->
+## 구현 현황
+- [ ] Supabase 구현
+- [ ] 프론트엔드 구현
+- [ ] 테스트
 ```
 
 ## 개발 규칙
-- (추후 추가)
+- 백엔드 구현은 Supabase 단일 사용 (SQL 쿼리, RLS 정책, Edge Function)
+- 별도 서버 추가 시 `server/` 디렉토리 생성
+- 이슈 번호는 `issues/` 폴더 스캔 후 auto-increment
