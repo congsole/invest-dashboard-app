@@ -1,6 +1,7 @@
 ---
 name: db-schema-agent
 description: domain-model-agent 실행 후 호출. issue.md와 도메인 모델을 읽고 Supabase(PostgreSQL) 스키마를 설계하여 docs/architecture/db-schema.md를 업데이트한다.
+model: sonnet
 ---
 
 ## 역할

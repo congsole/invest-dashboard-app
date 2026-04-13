@@ -1,6 +1,7 @@
 ---
 name: api-spec-agent
 description: db-schema-agent 실행 후 호출. issue.md, 도메인 모델, DB 스키마를 읽고 API 명세를 설계하여 docs/api/api-spec.md를 업데이트한다.
+model: sonnet
 ---
 
 ## 역할

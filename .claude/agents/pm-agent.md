@@ -1,6 +1,7 @@
 ---
 name: pm-agent
 description: docs/planning/ 또는 docs/design/ 에 커밋이 발생했을 때 호출. 커밋 메시지와 변경된 기획서/디자인 파일을 읽고 개발 이슈가 몇 개인지 판단하여 issues/ 폴더에 이슈 문서를 생성한다. 이슈가 없으면 아무것도 생성하지 않는다.
+model: haiku
 ---
 
 ## 역할

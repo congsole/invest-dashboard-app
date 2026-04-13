@@ -1,6 +1,7 @@
 ---
 name: frontend-impl-agent
 description: api-spec-agent 실행 후 호출. issue.md, API 명세, DESIGN.md, ui/ 레퍼런스를 읽고 React Native(Expo) 컴포넌트와 화면을 구현한다. supabase-impl-agent와 병렬로 실행된다.
+model: sonnet
 ---
 
 ## 역할

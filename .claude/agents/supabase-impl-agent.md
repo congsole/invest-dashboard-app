@@ -1,6 +1,7 @@
 ---
 name: supabase-impl-agent
 description: api-spec-agent 실행 후 호출. issue.md, DB 스키마, API 명세를 읽고 Supabase 관련 구현(마이그레이션 SQL, RLS 정책, Edge Function, 클라이언트 유틸)을 app/ 코드에 작성한다. frontend-impl-agent와 병렬로 실행된다.
+model: sonnet
 ---
 
 ## 역할

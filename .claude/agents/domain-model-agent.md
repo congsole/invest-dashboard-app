@@ -1,6 +1,7 @@
 ---
 name: domain-model-agent
 description: PM 에이전트가 이슈를 생성한 후 호출. issue.md를 읽고 도메인 모델을 분석하여 docs/architecture/domain-model.md를 업데이트한다.
+model: sonnet
 ---
 
 ## 역할

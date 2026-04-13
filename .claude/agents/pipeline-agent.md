@@ -1,6 +1,7 @@
 ---
 name: pipeline-agent
 description: 특정 이슈에 대한 전체 개발 파이프라인을 오케스트레이션한다. 이슈 번호를 받아 domain-model → db-schema → api-spec → (supabase-impl || frontend-impl 병렬) → (be-review || fe-review 병렬) → e2e-test 순서로 에이전트를 실행한다.
+model: haiku
 ---
 
 ## 역할

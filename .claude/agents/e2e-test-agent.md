@@ -1,6 +1,7 @@
 ---
 name: e2e-test-agent
 description: be-reviewer-agent와 fe-reviewer-agent가 모두 합격한 후 호출. 실제 Supabase 데이터를 기반으로 프론트엔드와 백엔드의 통합 동작을 검증하고 발견된 버그를 수정한다.
+model: sonnet
 ---
 
 ## 역할

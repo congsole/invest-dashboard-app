@@ -1,6 +1,7 @@
 ---
 name: be-reviewer-agent
 description: supabase-impl-agent 실행 후 호출. 구현된 Supabase 코드를 리뷰하고 수정 사이클을 진행한다. 최대 1회 initial review + 3회 fix/confirmation 사이클. 미해결 시 사용자에게 escalate.
+model: opus
 ---
 
 ## 역할
