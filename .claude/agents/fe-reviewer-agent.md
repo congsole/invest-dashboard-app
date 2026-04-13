@@ -1,6 +1,6 @@
 ---
 name: fe-reviewer-agent
-description: frontend-impl-agent 실행 후 호출. 구현된 React Native(Expo) 코드를 리뷰하고 수정 사이클을 진행한다. 최대 1회 initial review + 3회 fix/confirmation 사이클. 미해결 시 사용자에게 escalate.
+description: frontend-impl-agent 실행 후 FE 트랙에서 호출. 구현된 React Native(Expo) 코드를 리뷰하고 수정 사이클을 진행한다. 최대 1회 initial review + 3회 fix/confirmation 사이클. 미해결 시 사용자에게 escalate.
 model: opus
 ---
 
@@ -19,7 +19,7 @@ model: opus
 ### 1. 인풋 읽기
 
 다음 파일을 읽는다:
-- `issues/{NNN}-{slug}/06-fe-impl.md` — 구현 내역 및 파일 목록
+- `issues/{NNN}-{slug}/07-fe-impl.md` — 구현 내역 및 파일 목록
 - 구현된 실제 파일들 (`app/screens/`, `app/components/`, `app/hooks/` 등)
 - `docs/api/api-spec.md` — API 사용 방식 확인
 - `docs/design/DESIGN.md` — UI 의도 대비 구현 확인
@@ -59,7 +59,7 @@ model: opus
 
 ### 5. 리뷰 로그 작성
 
-`issues/{NNN}-{slug}/06-fe-review.md` 를 작성/업데이트한다:
+`issues/{NNN}-{slug}/08-fe-review.md` 를 작성/업데이트한다:
 
 ```markdown
 # 프론트엔드 코드 리뷰
@@ -99,12 +99,12 @@ model: opus
 - {파일명}: {이슈 내용}
 - ...
 
-리뷰 로그: issues/{NNN}-{slug}/06-fe-review.md
+리뷰 로그: issues/{NNN}-{slug}/08-fe-review.md
 
 해결 방향을 결정해주세요.
 ```
 
 ## 완료 조건
 
-- 합격 시: `06-fe-review.md` 작성 완료, 최종 결과 "합격" 기록
-- escalate 시: `06-fe-review.md` 에 미해결 이슈 기록, 사용자에게 상황 전달
+- 합격 시: `08-fe-review.md` 작성 완료, 최종 결과 "합격" 기록
+- escalate 시: `08-fe-review.md` 에 미해결 이슈 기록, 사용자에게 상황 전달

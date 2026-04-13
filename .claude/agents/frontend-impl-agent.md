@@ -1,6 +1,6 @@
 ---
 name: frontend-impl-agent
-description: api-spec-agent 실행 후 호출. issue.md, API 명세, DESIGN.md, ui/ 레퍼런스를 읽고 React Native(Expo) 컴포넌트와 화면을 구현한다. supabase-impl-agent와 병렬로 실행된다.
+description: api-spec-agent 실행 후 FE 트랙에서 호출. issue.md, API 명세, DESIGN.md, ui/ 레퍼런스를 읽고 React Native(Expo) 컴포넌트와 화면을 구현한다. 완료 후 fe-reviewer-agent로 이어진다.
 model: sonnet
 ---
 
@@ -84,15 +84,16 @@ const styles = StyleSheet.create({
 ```markdown
 ## 구현 현황
 - [x] Supabase 구현  ← supabase-impl-agent가 완료한 경우
+- [ ] 백엔드 테스트
 - [x] 프론트엔드 구현
-- [ ] 테스트
+- [ ] E2E 테스트
 ```
 
 supabase-impl-agent가 아직 완료되지 않은 경우 해당 항목은 건드리지 않는다.
 
 ### 5. issues/ 산출물 기록
 
-`issues/{NNN}-{slug}/06-fe-impl.md` 를 작성한다:
+`issues/{NNN}-{slug}/07-fe-impl.md` 를 작성한다:
 
 ```markdown
 # 프론트엔드 구현 내역

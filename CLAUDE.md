@@ -39,18 +39,25 @@ invest-dashboard/
 ├── issues/
 │   └── {NNN}-{issue-title}/
 │       ├── issue.md          # 이슈 정의 + docs 변경 내역
-│       ├── 04-supabase-impl.md
-│       ├── 05-be-review.md
-│       ├── 06-fe-review.md
-│       └── 07-test-results.md
+│       ├── 04-supabase-impl.md   # BE 트랙: Supabase 구현 내역
+│       ├── 05-be-review.md       # BE 트랙: 백엔드 코드 리뷰
+│       ├── 06-backend-test.md    # BE 트랙: Jest 통합 테스트 결과
+│       ├── 07-fe-impl.md         # FE 트랙: 프론트엔드 구현 내역
+│       ├── 08-fe-review.md       # FE 트랙: 프론트엔드 코드 리뷰
+│       └── 09-e2e-test.md        # Maestro E2E 테스트 결과
 └── app/                 # React Native (Expo) 앱 — 실제 코드
     ├── services/        # Supabase API 호출 (도메인별, 예: auth.ts, portfolio.ts)
     ├── hooks/           # 커스텀 훅
     ├── screens/         # 화면 컴포넌트
     ├── components/      # 공통 컴포넌트
     ├── types/           # 공통 타입
-    └── supabase/
-        └── migrations/  # DB 마이그레이션 SQL
+    ├── supabase/
+    │   └── migrations/  # DB 마이그레이션 SQL
+    └── tests/
+        └── integration/ # Jest 백엔드 통합 테스트
+tests/
+└── e2e/                 # Maestro E2E 플로우 파일
+    └── {issue-slug}/
 ```
 
 ## 에이전트 워크플로우
@@ -79,19 +86,23 @@ invest-dashboard/
   api-spec-agent      →  docs/api/api-spec.md 업데이트
                          issue.md에 변경 내역 기록
         │
-        ├─────────────────────────────┐
-        ▼ (background)               ▼ (background, 병렬)
-  supabase-impl-agent          frontend-impl-agent
-  (쿼리 + RLS + Edge Fn)       인풋: issue.md + api-spec.md
-                               + docs/design/DESIGN.md
-                               + ui/{기능명}/*.html, *.css
-                               → RN/Expo 컴포넌트 구현
-        │                            │
-  [be review loop]            [fe review loop]
-        │                            │
-        └──────────────┬─────────────┘
-                       ▼
+        ├─────────────────────────────────────┐
+        ▼ BE 트랙 (background)               ▼ FE 트랙 (background, 독립 병렬)
+  supabase-impl-agent                  frontend-impl-agent
+  (쿼리 + RLS + Edge Fn)               인풋: issue.md + api-spec.md
+        │                              + DESIGN.md + ui/{기능명}/
+        ▼                                    │
+  be-reviewer-agent                    fe-reviewer-agent
+  (코드 리뷰 + 수정)                   (코드 리뷰 + 수정)
+        │                                    │
+        ▼                                    │
+  backend-test-agent                         │
+  (Jest → 실제 Supabase CRUD 검증)           │
+        │                                    │
+        └──────────────┬──────────────────────┘
+                       ▼ 두 트랙 모두 합격 후
                   e2e-test-agent
+                  (Maestro → iOS 시뮬레이터 실제 앱 테스트)
 ```
 
 ### 코드 리뷰 루프 규칙
@@ -137,8 +148,9 @@ invest-dashboard/
 <!-- 구현 단계에서 업데이트 -->
 ## 구현 현황
 - [ ] Supabase 구현
+- [ ] 백엔드 테스트
 - [ ] 프론트엔드 구현
-- [ ] 테스트
+- [ ] E2E 테스트
 ```
 
 ## 개발 규칙
