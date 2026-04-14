@@ -48,28 +48,71 @@ brew install maestro
 설치 후 다시 실행해주세요.
 ```
 
-### 3. 시뮬레이터 및 앱 확인
+### 3. 시뮬레이터 및 Expo 서버 자동 시작
 
-iOS 시뮬레이터에서 Expo Go 앱이 실행 중인지 확인한다.
+#### 3-1. 시뮬레이터 부팅
 
 ```bash
-# 실행 중인 시뮬레이터 확인
 xcrun simctl list devices | grep Booted
 ```
 
-시뮬레이터가 실행 중이 아니거나 Expo 앱이 열려있지 않으면 사용자에게 안내:
+Booted 상태인 시뮬레이터가 없으면 자동으로 부팅한다:
 
+```bash
+# 사용 가능한 iPhone 시뮬레이터 ID 추출 (첫 번째)
+DEVICE_ID=$(xcrun simctl list devices available | grep "iPhone" | grep -v unavailable | head -1 | grep -Eo '\([A-F0-9-]{36}\)' | tr -d '()')
+xcrun simctl boot "$DEVICE_ID"
+open -a Simulator
+# 시뮬레이터 UI가 뜰 때까지 대기
+sleep 3
 ```
-⚠️ E2E 테스트 준비 필요
 
-iOS 시뮬레이터에서 앱을 실행해주세요:
-  cd app && npx expo start --ios
+#### 3-2. Expo 개발 서버 시작
 
-Expo Go가 시뮬레이터에서 열린 후 계속 진행합니다.
-준비되면 알려주세요.
+포트 8081이 이미 사용 중이면(서버가 실행 중) 이 단계를 건너뛴다:
+
+```bash
+curl -s http://localhost:8081 > /dev/null 2>&1 && echo "already running"
 ```
 
-사용자 확인 후 진행한다. 앱이 준비된 경우 appId는 `host.exp.exponent` (Expo Go).
+서버가 실행 중이 아니면 백그라운드로 시작한다:
+
+```bash
+cd app && npx expo start --port 8081 > /tmp/expo-e2e.log 2>&1 &
+echo $! > /tmp/expo-e2e.pid
+```
+
+서버가 준비될 때까지 최대 60초 폴링한다:
+
+```bash
+for i in $(seq 1 60); do
+  if curl -s http://localhost:8081 > /dev/null 2>&1; then
+    echo "Expo server ready (${i}s)"
+    break
+  fi
+  if [ $i -eq 60 ]; then
+    echo "ERROR: Expo server did not start within 60s"
+    cat /tmp/expo-e2e.log
+    exit 1
+  fi
+  sleep 1
+done
+```
+
+60초 내 실패 시 로그를 출력하고 사용자에게 escalate한다.
+
+#### 3-3. 테스트 후 서버 정리
+
+테스트가 끝나면 (성공/실패 무관) 백그라운드 Expo 프로세스를 종료한다:
+
+```bash
+if [ -f /tmp/expo-e2e.pid ]; then
+  kill $(cat /tmp/expo-e2e.pid) 2>/dev/null
+  rm /tmp/expo-e2e.pid
+fi
+```
+
+appId는 `host.exp.exponent` (Expo Go), 프로젝트 URL은 `exp://localhost:8081`.
 
 ### 4. 테스트 시나리오 작성
 
@@ -109,6 +152,8 @@ appId: host.exp.exponent
 # 회원가입 정상 흐름
 - launchApp:
     clearState: true
+    arguments:
+      url: "exp://localhost:8081"
 
 # 회원가입 화면으로 이동
 - tapOn:
@@ -145,7 +190,9 @@ appId: host.exp.exponent
 ```yaml
 appId: host.exp.exponent
 ---
-- launchApp
+- launchApp:
+    arguments:
+      url: "exp://localhost:8081"
 
 - tapOn:
     text: "로그인"
