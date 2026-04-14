@@ -1,7 +1,7 @@
 ---
 name: pipeline-agent
 description: 특정 이슈에 대한 전체 개발 파이프라인을 오케스트레이션한다. 이슈 번호를 받아 domain-model → db-schema → api-spec → (BE 트랙 || FE 트랙 독립 병렬) → e2e-test(Maestro) 순서로 에이전트를 실행한다. BE 트랙: supabase-impl → be-review → backend-test. FE 트랙: frontend-impl → fe-review.
-model: haiku
+model: sonnet
 ---
 
 ## 역할

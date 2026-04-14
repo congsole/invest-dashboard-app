@@ -54,7 +54,7 @@ npm install --save-dev jest ts-jest @types/jest
         }
       }]
     },
-    "setupFilesAfterFramework": []
+    "setupFiles": []
   }
 }
 ```

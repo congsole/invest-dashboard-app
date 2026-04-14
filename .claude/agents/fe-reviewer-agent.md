@@ -1,7 +1,7 @@
 ---
 name: fe-reviewer-agent
 description: frontend-impl-agent 실행 후 FE 트랙에서 호출. 구현된 React Native(Expo) 코드를 리뷰하고 수정 사이클을 진행한다. 최대 1회 initial review + 3회 fix/confirmation 사이클. 미해결 시 사용자에게 escalate.
-model: opus
+model: sonnet
 ---
 
 ## 역할
@@ -40,6 +40,12 @@ model: opus
 
 이슈가 없으면 → **합격**, 리뷰 로그 작성 후 완료
 이슈가 있으면 → Fix 단계로 진행
+
+**BE 병렬 실행 중 TODO 처리 기준**
+BE 트랙과 병렬 실행 중인 경우, frontend-impl-agent가 미완성 서비스 함수를 `// TODO: supabase-impl-agent 완료 후 연동` 주석으로 처리했을 수 있다. 이 경우:
+- TODO 주석이 있는 import/호출 → **리뷰 이슈로 처리하지 않음** (병렬 실행의 정상 상태)
+- TODO 주석 없이 서비스 함수가 잘못 구현된 경우 → 일반 이슈로 처리
+- 리뷰 로그에 "BE 트랙 병렬 실행 중 — TODO N건 존재, BE 완료 후 확인 필요" 명시
 
 ### 3. Fix
 
