@@ -103,18 +103,23 @@ tests/
   (Maestro → iOS 시뮬레이터 실제 앱 테스트)
 ```
 
-### 자동화 계획 (미검증 — 추후 적용)
+### 자동화 (검증 완료 — 적용됨)
 
-git hook 또는 Claude Code hook에서 `claude -p "..."` 로 headless Claude 인스턴스를 실행하면, 해당 인스턴스는 메인 Claude와 동일하게 Agent 툴로 서브에이전트를 spawn할 수 있을 것으로 예상된다. 검증 후 아래 흐름으로 자동화한다:
+`claude -p`로 실행한 headless 인스턴스는 메인 Claude와 동일하게 Agent 툴로 서브에이전트를 spawn할 수 있음을 확인했다. (Agent spawn 제한은 에이전트가 spawn한 하위 에이전트에만 적용됨)
+
+`.git/hooks/post-commit`에 구현되어 있으며, 로그는 `.claude/pipeline.log`에 기록된다.
 
 ```
 git commit (docs/planning/ 또는 docs/design/ 변경)
   → post-commit hook
-  → claude -p "docs/planning/ 변경을 감지했어. 파이프라인을 실행해줘."
-  → headless Claude가 위 파이프라인을 그대로 실행
+  → claude -p "..." (background, PID disown)
+      → [1] domain-model-agent → db-schema-agent → api-spec-agent (순차)
+      → [2] pm-agent (이슈 생성)
+      → [3] 각 이슈 BE/FE 병렬 background
+      → [4] e2e-test-agent
 ```
 
-검증 방법: hook에서 `claude -p`로 실행한 인스턴스가 Agent 툴 호출을 실제로 수행하는지 확인.
+검증 스크립트: `.claude/test-headless-agent-spawn.sh`
 
 ### 코드 리뷰 루프 규칙
 - initial review: 1회
