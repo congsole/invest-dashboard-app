@@ -16,7 +16,7 @@ model: sonnet
 - `issues/{NNN}-{slug}/issue.md` — 이슈 개요
 - `docs/api/api-spec.md` — 사용할 API 목록과 타입
 - `docs/design/DESIGN.md` — UI 설계 의도, 컴포넌트 가이드라인
-- `ui/{기능명}/` 하위의 HTML, CSS 파일 — 레이아웃 및 스타일 레퍼런스
+- `ui/{기능명}/code.html` — 레이아웃 및 스타일 레퍼런스
 - `app/` 디렉토리 구조 — 기존 컴포넌트, 네비게이션, 스타일 패턴 파악
 
 ### 2. 구현 범위 파악
@@ -42,7 +42,7 @@ app/
 기존 구조가 다르면 그 구조를 따른다. 새 폴더를 임의로 만들지 않는다.
 
 #### 3-2. UI 레퍼런스 변환 규칙
-`ui/` 의 HTML/CSS를 React Native로 변환할 때:
+`ui/{기능명}/code.html` 을 React Native로 변환할 때:
 - `div` → `View`
 - `p`, `span`, `h1~h6` → `Text`
 - `img` → `Image`
@@ -108,7 +108,7 @@ supabase-impl-agent가 아직 완료되지 않은 경우 해당 항목은 건드
 - `app/{path}` — {변경 내용}
 
 ## UI 레퍼런스 매핑
-- `ui/{기능명}/index.html` → `app/screens/{ScreenName}.tsx`
+- `ui/{기능명}/code.html` → `app/screens/{ScreenName}.tsx`
 
 ## 특이사항
 구현 중 결정 사항, RN 변환 시 주의한 점 등

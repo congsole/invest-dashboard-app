@@ -32,10 +32,9 @@ invest-dashboard/
 │   │   └── db-schema.md      # 공통 DB 스키마 (이슈마다 누적 업데이트)
 │   └── api/
 │       └── api-spec.md       # 공통 API 명세 (이슈마다 누적 업데이트)
-├── ui/                  # UI 레퍼런스 파일 (HTML, CSS)
+├── ui/                  # UI 레퍼런스 파일
 │   └── {기능명}/
-│       ├── index.html
-│       └── style.css
+│       └── code.html
 ├── issues/
 │   └── {NNN}-{issue-title}/
 │       ├── issue.md          # 이슈 정의 + docs 변경 내역
@@ -62,48 +61,60 @@ tests/
 
 ## 에이전트 워크플로우
 
-### 트리거
-`docs/planning/` 또는 `docs/design/` 에 변경이 생기면 PM 에이전트가 실행되어 `issues/` 에 이슈를 생성한다.
+### 오케스트레이션 원칙
+
+- **메인 Claude가 직접 오케스트레이션한다** — 별도 pipeline-agent 없음
+- 서브에이전트는 하위 에이전트를 spawn할 수 없으므로, 모든 에이전트 호출은 메인 Claude에서만 한다
+- 현재는 **수동 트리거** (사용자 요청 → 메인 Claude 실행)
+- 자동화 계획은 하단 참조
 
 ### 파이프라인
+
 ```
-[docs/planning/ 또는 docs/design/ 커밋]
-  인풋: 커밋 메시지 + 변경된 기획서/디자인 파일
+[사용자: "기획서 변경됐어, 파이프라인 실행해줘"]
         │
         ▼
-    PM-agent
+  메인 Claude (오케스트레이터)
+        │
+        ▼ [1] 이슈 생성
+    pm-agent
     └─ issues/{NNN}-{title}/issue.md 생성 (이슈 번호 auto-increment)
         │
-        ▼  인풋: issue.md
+        ▼ [2] 설계 — 순차 실행 (공유 docs/ 파일, 1회만)
   domain-model-agent  →  docs/architecture/domain-model.md 업데이트
-                         issue.md에 변경 내역 기록
         │
-        ▼  인풋: issue.md + domain-model.md
   db-schema-agent     →  docs/architecture/db-schema.md 업데이트
-                         issue.md에 변경 내역 기록
         │
-        ▼  인풋: issue.md + domain-model.md + db-schema.md
   api-spec-agent      →  docs/api/api-spec.md 업데이트
-                         issue.md에 변경 내역 기록
         │
-        ├─────────────────────────────────────┐
-        ▼ BE 트랙 (background)               ▼ FE 트랙 (background, 독립 병렬)
-  supabase-impl-agent                  frontend-impl-agent
-  (쿼리 + RLS + Edge Fn)               인풋: issue.md + api-spec.md
-        │                              + DESIGN.md + ui/{기능명}/
-        ▼                                    │
-  be-reviewer-agent                    fe-reviewer-agent
-  (코드 리뷰 + 수정)                   (코드 리뷰 + 수정)
-        │                                    │
-        ▼                                    │
-  backend-test-agent                         │
-  (Jest → 실제 Supabase CRUD 검증)           │
-        │                                    │
-        └──────────────┬──────────────────────┘
-                       ▼ 두 트랙 모두 합격 후
-                  e2e-test-agent
-                  (Maestro → iOS 시뮬레이터 실제 앱 테스트)
+        ▼ [3] 구현 — 모든 이슈의 BE/FE를 동시에 병렬 background 실행
+  ┌─────────────────────────────────────────────────────────┐
+  │ 이슈 A - BE 트랙        │ 이슈 A - FE 트랙             │
+  │ supabase-impl-agent     │ frontend-impl-agent           │
+  │ → be-reviewer-agent     │ → fe-reviewer-agent           │
+  │ → backend-test-agent    │                               │
+  ├─────────────────────────┼───────────────────────────────┤
+  │ 이슈 B - BE 트랙        │ 이슈 B - FE 트랙             │
+  │ ...                     │ ...                           │
+  └─────────────────────────────────────────────────────────┘
+        │ 모든 트랙 합격 후
+        ▼ [4] E2E 테스트
+  e2e-test-agent
+  (Maestro → iOS 시뮬레이터 실제 앱 테스트)
 ```
+
+### 자동화 계획 (미검증 — 추후 적용)
+
+git hook 또는 Claude Code hook에서 `claude -p "..."` 로 headless Claude 인스턴스를 실행하면, 해당 인스턴스는 메인 Claude와 동일하게 Agent 툴로 서브에이전트를 spawn할 수 있을 것으로 예상된다. 검증 후 아래 흐름으로 자동화한다:
+
+```
+git commit (docs/planning/ 또는 docs/design/ 변경)
+  → post-commit hook
+  → claude -p "docs/planning/ 변경을 감지했어. 파이프라인을 실행해줘."
+  → headless Claude가 위 파이프라인을 그대로 실행
+```
+
+검증 방법: hook에서 `claude -p`로 실행한 인스턴스가 Agent 툴 호출을 실제로 수행하는지 확인.
 
 ### 코드 리뷰 루프 규칙
 - initial review: 1회
