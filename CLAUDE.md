@@ -76,16 +76,16 @@ tests/
         ▼
   메인 Claude (오케스트레이터)
         │
-        ▼ [1] 이슈 생성
-    pm-agent
-    └─ issues/{NNN}-{title}/issue.md 생성 (이슈 번호 auto-increment)
-        │
-        ▼ [2] 설계 — 순차 실행 (공유 docs/ 파일, 1회만)
+        ▼ [1] 설계 — 순차 실행 (기획서/디자인 파일 직접 읽음)
   domain-model-agent  →  docs/architecture/domain-model.md 업데이트
         │
   db-schema-agent     →  docs/architecture/db-schema.md 업데이트
         │
   api-spec-agent      →  docs/api/api-spec.md 업데이트
+        │
+        ▼ [2] 이슈 생성 (완성된 설계 기반으로 판단, docs 변경 내역 issue.md에 기록)
+    pm-agent
+    └─ issues/{NNN}-{title}/issue.md 생성 (이슈 번호 auto-increment)
         │
         ▼ [3] 구현 — 모든 이슈의 BE/FE를 동시에 병렬 background 실행
   ┌─────────────────────────────────────────────────────────┐

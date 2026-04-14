@@ -1,6 +1,6 @@
 ---
 name: pm-agent
-description: docs/planning/ 또는 docs/design/ 에 커밋이 발생했을 때 호출. 커밋 메시지와 변경된 기획서/디자인 파일을 읽고 개발 이슈가 몇 개인지 판단하여 issues/ 폴더에 이슈 문서를 생성한다. 이슈가 없으면 아무것도 생성하지 않는다.
+description: 설계 에이전트(domain-model, db-schema, api-spec) 실행 후 호출. 변경된 기획서/디자인 파일을 읽고 개발 이슈가 몇 개인지 판단하여 issues/ 폴더에 이슈 문서를 생성한다. docs 변경 내역은 git diff로 파악하여 issue.md에 기록한다. 이슈가 없으면 아무것도 생성하지 않는다.
 model: haiku
 ---
 
@@ -76,19 +76,26 @@ model: haiku
 - 기획서: {변경된 docs/planning/ 파일 경로} (해당 시)
 - 디자인: {변경된 docs/design/ 파일 경로} (해당 시)
 
-<!-- domain-model-agent 작성 후 추가 -->
 ## docs 변경 내역
 
+다음 명령으로 설계 에이전트들이 방금 업데이트한 내역을 파악한다:
+```bash
+git diff HEAD docs/architecture/domain-model.md
+git diff HEAD docs/architecture/db-schema.md
+git diff HEAD docs/api/api-spec.md
+```
+(아직 커밋되지 않은 변경 사항이므로 `HEAD` 기준 diff 사용)
+
+변경된 내용을 요약하여 아래 형식으로 채운다:
+
 ### domain-model.md
-(domain-model-agent 작성 예정)
+- [추가/수정/삭제] {엔터티} — {변경 내용 요약}
 
-<!-- db-schema-agent 작성 후 추가 -->
 ### db-schema.md
-(db-schema-agent 작성 예정)
+- [추가/수정/삭제] {테이블} — {변경 내용 요약}
 
-<!-- api-spec-agent 작성 후 추가 -->
 ### api-spec.md
-(api-spec-agent 작성 예정)
+- [추가/수정/삭제] {도메인} — {API명} ({방식})
 
 <!-- 구현 단계에서 업데이트 -->
 ## 구현 현황

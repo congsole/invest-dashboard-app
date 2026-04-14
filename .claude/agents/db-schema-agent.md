@@ -13,8 +13,7 @@ model: sonnet
 ### 1. 인풋 읽기
 
 다음 파일을 읽는다:
-- `issues/{NNN}-{slug}/issue.md` — 이슈 개요 및 변경 내역 확인
-- `docs/architecture/domain-model.md` — 최신 도메인 모델
+- `docs/architecture/domain-model.md` — 최신 도메인 모델 (domain-model-agent가 방금 업데이트한 버전)
 - `docs/architecture/db-schema.md` — 기존 스키마 (없으면 새로 생성)
 
 ### 2. 스키마 설계
@@ -75,22 +74,8 @@ Supabase 환경을 고려한 규칙:
 - 기존 테이블을 수정할 때는 해당 섹션을 직접 편집
 - 변경 이력 테이블에 이번 이슈 항목 추가
 
-### 4. issue.md 변경 내역 업데이트
-
-`issues/{NNN}-{slug}/issue.md` 의 아래 섹션을 채운다:
-
-```markdown
-### db-schema.md
-- [추가] {table_name} 테이블 — {컬럼 요약}
-- [수정] {table_name} — {변경 내용}
-- [삭제] {table_name} — {이유}
-```
-
-`(db-schema-agent 작성 예정)` placeholder를 실제 내용으로 교체한다.
-
 ## 완료 조건
 
 - `docs/architecture/db-schema.md` 가 업데이트됨
-- `issue.md`의 `### db-schema.md` 섹션이 채워짐
 - 도메인 모델의 모든 엔터티가 테이블로 반영됨
-- 완료 후 추가/변경된 테이블 목록을 출력한다
+- 완료 후 추가/변경/삭제된 테이블 목록을 출력한다 (pm-agent가 이 출력을 참조하여 issue.md에 기록)
