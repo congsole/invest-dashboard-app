@@ -87,20 +87,26 @@ tests/
     pm-agent
     └─ issues/{NNN}-{title}/issue.md 생성 (이슈 번호 auto-increment)
         │
-        ▼ [3] 구현 — 모든 이슈의 BE/FE를 동시에 병렬 background 실행
-  ┌─────────────────────────────────────────────────────────┐
-  │ 이슈 A - BE 트랙        │ 이슈 A - FE 트랙             │
-  │ supabase-impl-agent     │ frontend-impl-agent           │
-  │ → be-reviewer-agent     │ → fe-reviewer-agent           │
-  │ → backend-test-agent    │                               │
-  ├─────────────────────────┼───────────────────────────────┤
-  │ 이슈 B - BE 트랙        │ 이슈 B - FE 트랙             │
-  │ ...                     │ ...                           │
-  └─────────────────────────────────────────────────────────┘
-        │ 모든 트랙 합격 후
-        ▼ [4] E2E 테스트
+        ▼ [3] 구현 — n+1 병렬 (BE 순차 1 + FE 병렬 n)
+  ┌──────────────────────────────┐  ┌─────────────────────┐
+  │ BE 체인 (1스레드, 순차)          │  │ FE 병렬 (이슈마다)     │
+  │                              │  │                     │
+  │ 이슈 A:                       │  │ 이슈 A:              │
+  │  supabase-impl-agent         │  │  frontend-impl      │
+  │  → be-reviewer-agent         │  │  → fe-reviewer      │
+  │  → backend-test-agent        │  │                     │
+  │        ↓                     │  │ 이슈 B:              │
+  │ 이슈 B:                       │  │  frontend-impl      │
+  │  supabase-impl-agent         │  │  → fe-reviewer      │
+  │  → be-reviewer-agent         │  │                     │
+  │  → backend-test-agent        │  │ ...                 │
+  │  ...                         │  │                     │
+  └──────────────────────────────┘  └─────────────────────┘
+        │ 모든 트랙 합격 후 파이프라인 종료
+        │
+        ▼ [4] E2E 테스트 (수동 — 자동 파이프라인에 미포함)
   e2e-test-agent
-  (Maestro → iOS 시뮬레이터 실제 앱 테스트)
+  (Maestro → iOS 시뮬레이터, 사용자가 직접 트리거)
 ```
 
 ### 자동화 (검증 완료 — 적용됨)
@@ -116,7 +122,7 @@ git commit (docs/planning/ 또는 docs/design/ 변경)
       → [1] domain-model-agent → db-schema-agent → api-spec-agent (순차)
       → [2] pm-agent (이슈 생성)
       → [3] 각 이슈 BE/FE 병렬 background
-      → [4] e2e-test-agent
+      → 완료 (E2E는 수동 트리거)
 ```
 
 검증 스크립트: `.claude/test-headless-agent-spawn.sh`

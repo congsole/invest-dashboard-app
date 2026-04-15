@@ -55,8 +55,8 @@ app/
 #### 3-3. 컴포넌트 작성 규칙
 - 언어: TypeScript, `any` 사용 금지
 - 스타일: `StyleSheet.create()` 사용, 인라인 스타일 지양
-- API 호출: `app/utils/` 의 유틸 함수 사용 (supabase-impl-agent가 작성한 함수)
-  - supabase-impl-agent가 아직 완료되지 않은 경우, 함수 시그니처만 import하고 TODO 주석 표시
+- API 호출: `app/services/` 의 서비스 함수 사용 (supabase-impl-agent가 작성한 함수)
+  - supabase-impl-agent가 아직 완료되지 않은 경우, `app/services/` 함수 시그니처만 import하고 TODO 주석 표시
 - 로딩/에러 상태 처리 포함
 - props 타입은 interface로 명시
 
@@ -77,21 +77,9 @@ const styles = StyleSheet.create({
 })
 ```
 
-### 4. issue.md 구현 현황 업데이트
+### 4. issues/ 산출물 기록
 
-`issues/{NNN}-{slug}/issue.md` 의 구현 현황을 업데이트한다:
-
-```markdown
-## 구현 현황
-- [x] Supabase 구현  ← supabase-impl-agent가 완료한 경우
-- [ ] 백엔드 테스트
-- [x] 프론트엔드 구현
-- [ ] E2E 테스트
-```
-
-supabase-impl-agent가 아직 완료되지 않은 경우 해당 항목은 건드리지 않는다.
-
-### 5. issues/ 산출물 기록
+> **주의**: `issue.md`의 구현 현황 체크박스는 수정하지 않는다. 오케스트레이터(메인 Claude)가 에이전트 완료 후 업데이트한다.
 
 `issues/{NNN}-{slug}/07-fe-impl.md` 를 작성한다:
 

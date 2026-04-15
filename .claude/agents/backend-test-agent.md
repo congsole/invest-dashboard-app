@@ -65,21 +65,33 @@ npm install --save-dev jest ts-jest @types/jest
 jest.setTimeout(30000)
 ```
 
-### 3. 환경변수 확인
+### 3. 환경변수 확인 및 설정
 
-`app/.env.test` 파일이 있는지 확인한다. 없으면 사용자에게 안내 후 중단:
+다음 순서로 `.env.test`를 준비한다:
+
+#### 3-1. 파일이 없으면 생성
+`app/` 디렉토리의 환경 변수 파일을 모두 확인하여 Supabase 관련 값을 찾아 `app/.env.test`를 생성한다:
+```
+SUPABASE_URL={찾은 URL 값}
+SUPABASE_ANON_KEY={찾은 anon/publishable key 값}
+SUPABASE_SERVICE_KEY=
+```
+
+#### 3-2. SUPABASE_SERVICE_KEY 확인
+`app/.env.test`의 `SUPABASE_SERVICE_KEY`가 비어있는지 확인한다.
+비어있으면 `06-backend-test.md`에 아래 내용을 기록하고 **테스트를 스킵**한다 (데드락 방지 — headless 모드에서는 사용자 응답을 받을 수 없음):
 
 ```
-⚠️ 백엔드 테스트 환경변수 필요
+⚠️ 백엔드 테스트 스킵 — SUPABASE_SERVICE_KEY 미설정
 
-app/.env.test 파일을 생성하고 아래 값을 설정해주세요:
-
-SUPABASE_URL=https://{project-ref}.supabase.co
-SUPABASE_SERVICE_KEY={service_role_key}   # 대시보드 > Settings > API > service_role
+app/.env.test 파일의 SUPABASE_SERVICE_KEY를 채워주세요:
+  Supabase 대시보드 → Settings → API → service_role (secret key)
 
 service_role 키는 RLS를 우회하여 테스트 데이터 정리에 사용됩니다.
-설정 후 다시 실행해주세요.
+설정 후 resume-pipeline.sh로 재실행해주세요.
 ```
+
+비어있지 않으면 다음 단계로 진행한다.
 
 ### 4. 테스트 파일 작성
 
@@ -231,17 +243,9 @@ npx jest --testPathPattern=tests/integration/{issue-slug} --verbose 2>&1
 통과 | Escalate
 ```
 
-### 8. issue.md 구현 현황 업데이트
+> **주의**: `issue.md`의 구현 현황 체크박스는 수정하지 않는다. 오케스트레이터(메인 Claude)가 에이전트 완료 후 업데이트한다.
 
-```markdown
-## 구현 현황
-- [x] Supabase 구현
-- [x] 백엔드 테스트
-- [ ] 프론트엔드 구현
-- [ ] E2E 테스트
-```
-
-### 9. Escalate (3회 초과 시)
+### 8. Escalate (3회 초과 시)
 
 ```
 ⚠️ 백엔드 통합 테스트 — 3회 사이클 후 미해결 실패 존재

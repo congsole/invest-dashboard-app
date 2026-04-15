@@ -13,7 +13,7 @@ model: sonnet
 ### 1. 인풋 읽기
 
 다음을 읽는다:
-- 가장 최근 커밋에서 변경된 `docs/planning/` 파일들 (`git diff HEAD~1 HEAD -- docs/planning/`)
+- 트리거 커밋에서 변경된 `docs/planning/` 파일들 (프롬프트에 커밋 해시가 전달된 경우 `git diff {hash}~1 {hash} -- docs/planning/`, 없으면 `git diff HEAD~1 HEAD -- docs/planning/`)
 - 변경된 기획서 파일의 전체 내용
 - `docs/architecture/domain-model.md` — 기존 도메인 모델 (없으면 새로 생성)
 
@@ -34,7 +34,7 @@ model: sonnet
 ```markdown
 # Domain Model
 
-*최종 업데이트: {이슈 번호} — {날짜}*
+*최종 업데이트: {커밋 해시 앞 7자리} — {날짜}*
 
 ## 엔터티
 

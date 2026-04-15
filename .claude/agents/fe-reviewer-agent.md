@@ -32,7 +32,7 @@ model: sonnet
 **검토 항목**
 - [ ] UI: `ui/` 레퍼런스 및 DESIGN.md 의도와 일치하는가
 - [ ] TypeScript: `any` 사용 여부, props 타입 누락 여부
-- [ ] API 연동: `app/utils/` 유틸 함수를 올바르게 사용하는가
+- [ ] API 연동: `app/services/` 서비스 함수를 올바르게 사용하는가
 - [ ] 상태 관리: 로딩/에러 상태가 처리되어 있는가
 - [ ] 스타일: 인라인 스타일 대신 `StyleSheet.create()` 사용하는가
 - [ ] RN 규칙: 웹 전용 API 사용 여부 (`document`, `window` 등)

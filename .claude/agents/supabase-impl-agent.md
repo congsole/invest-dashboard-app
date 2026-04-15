@@ -108,19 +108,9 @@ supabase link --project-ref {project-ref}  # Supabase 대시보드 URL에서 확
 - 에러 메시지를 읽고 SQL 수정 후 재시도
 - 해결 불가 시 사용자에게 에러 내용과 함께 escalate
 
-### 5. issue.md 구현 현황 업데이트
+### 5. issues/ 산출물 기록
 
-`issues/{NNN}-{slug}/issue.md` 의 구현 현황을 업데이트한다:
-
-```markdown
-## 구현 현황
-- [x] Supabase 구현
-- [ ] 백엔드 테스트
-- [ ] 프론트엔드 구현
-- [ ] E2E 테스트
-```
-
-### 6. issues/ 산출물 기록
+> **주의**: `issue.md`의 구현 현황 체크박스는 수정하지 않는다. 오케스트레이터(메인 Claude)가 에이전트 완료 후 업데이트한다.
 
 `issues/{NNN}-{slug}/04-supabase-impl.md` 를 작성한다:
 

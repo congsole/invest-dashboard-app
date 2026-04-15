@@ -155,13 +155,20 @@ appId: host.exp.exponent
     arguments:
       url: "exp://localhost:8081"
 
+# 앱 로드 대기 — Expo Go가 JS 번들을 받는 시간이 있으므로, 첫 화면에 실제로 표시되는 텍스트로 기다린다
+# 반드시 구현된 화면 코드를 읽고 첫 화면에 보이는 실제 텍스트로 교체할 것
+- extendedWaitUntil:
+    visible:
+      text: "{첫 화면에 실제로 보이는 텍스트}"
+    timeout: 30000
+
 # 회원가입 화면으로 이동
 - tapOn:
     text: "회원가입"
 
-# 이메일 입력
+# 이메일 입력 — testID 우선, 없으면 accessibilityLabel, 최후 수단으로 text
 - tapOn:
-    id: "email-input"    # testID 또는 accessibilityLabel 기준
+    id: "email-input"
 - inputText: "e2e-test-${MAESTRO_TIMESTAMP}@test.com"
 
 # 비밀번호 입력
@@ -173,17 +180,22 @@ appId: host.exp.exponent
 - tapOn:
     text: "가입하기"
 
-# 결과 검증: 홈 화면 진입 확인
-- assertVisible:
-    text: "홈"
+# 결과 검증: 홈 화면 진입 확인 — 다음 화면의 특정 요소로 전환 완료를 판단
+- extendedWaitUntil:
+    visible:
+      text: "홈"
+    timeout: 15000
 - assertNotVisible:
     text: "가입하기"
 ```
 
 **주의사항:**
-- `tapOn`의 기준: `id` (testID/accessibilityLabel) > `text` 순서로 우선 사용
-- 실제 구현된 컴포넌트의 `testID` 또는 `accessibilityLabel`을 확인하고 맞춰서 작성
-- 화면에 없는 testID 사용 시 테스트 실패 → 컴포넌트에 testID 추가 후 재실행
+- `openLink` 절대 사용 금지 — 매번 전체 번들을 재다운로드하여 수십 분 소요됨. 반드시 `launchApp` 사용
+- `waitForAnimationToEnd` 사용 금지 — 앱에 지속적인 애니메이션이 있으면 무한 대기함. 반드시 `extendedWaitUntil`로 특정 요소를 기다릴 것
+- **yaml 작성 전에 반드시 화면 컴포넌트 코드를 읽을 것** — 추측으로 작성하면 안 됨
+- **같은 텍스트가 화면에 두 개 이상 존재할 수 있음** (예: 라디오 버튼 레이블 "로그인" + 제출 버튼 "로그인"). `tapOn: text`는 위에 있는 것을 먼저 탭하므로 의도와 다른 요소가 탭될 수 있음. 이런 경우 반드시 `testID`를 사용할 것
+- 코드에 `testID`가 없는 요소는 컴포넌트에 `testID`를 직접 추가하고 yaml에서 `id`로 참조할 것
+- `tapOn`의 기준: `id` (testID/accessibilityLabel) > `text` 순서로 우선 사용. 특히 버튼류는 항상 `id` 사용
 - `${MAESTRO_TIMESTAMP}` 등 환경변수로 고유 테스트 데이터 생성
 
 **에러 케이스 플로우 예시 (`tests/e2e/{issue-slug}/02-login-error.yaml`):**
@@ -271,17 +283,9 @@ maestro test tests/e2e/{issue-slug}/01-signup.yaml
 - [ ] 느린 네트워크 환경에서 로딩 상태 확인
 ```
 
-### 9. issue.md 구현 현황 업데이트
+> **주의**: `issue.md`의 구현 현황 체크박스는 수정하지 않는다. 오케스트레이터(메인 Claude)가 에이전트 완료 후 업데이트한다.
 
-```markdown
-## 구현 현황
-- [x] Supabase 구현
-- [x] 백엔드 테스트
-- [x] 프론트엔드 구현
-- [x] E2E 테스트
-```
-
-### 10. Escalate (3회 초과 시)
+### 9. Escalate (3회 초과 시)
 
 ```
 ⚠️ E2E 테스트 — 3회 사이클 후 미해결 실패 존재
