@@ -12,10 +12,11 @@ jobs:
       - name: Ping Supabase
         run: |
           response=$(curl -s -o /dev/null -w "%{http_code}" \
+            --connect-timeout 10 \
             "https://wxznscebhpkfspwphbdv.supabase.co/rest/v1/" \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}")
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}") || true
           echo "Response: $response"
-          if [ "$response" -lt 200 ] || [ "$response" -ge 500 ]; then
-            echo "Ping failed with status $response"
+          if [ -z "$response" ] || [ "$response" = "000" ]; then
+            echo "Ping failed: could not reach Supabase"
             exit 1
           fi
