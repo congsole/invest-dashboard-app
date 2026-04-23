@@ -86,6 +86,8 @@ export async function {functionName}({params}: {ParamType}): Promise<{ReturnType
 - 함수마다 에러는 throw하고 호출부에서 처리
 - 타입은 명시적으로 정의 (`interface` 또는 `type`)
 - `any` 사용 금지
+- **수정 가능**: `app/services/`, `app/supabase/`, `app/types/`
+- **수정 금지**: `app/screens/`, `app/components/`, `app/hooks/` (frontend-impl-agent 소유)
 
 ### 4. 마이그레이션 DB 적용
 

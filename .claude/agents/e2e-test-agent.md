@@ -247,7 +247,7 @@ maestro test tests/e2e/{issue-slug}/01-signup.yaml
 | 텍스트 불일치 (assertVisible 실패) | 실제 화면 텍스트로 플로우 수정 |
 | 화면 전환 안 됨 | 프론트엔드 네비게이션 코드 수정 |
 | API 호출 실패 (화면에 에러 표시) | 서비스 함수 또는 Supabase 설정 수정 |
-| 타이밍 문제 (요소 로딩 전 탭) | 플로우에 `waitForAnimationToEnd` 또는 `assertVisible` 추가 |
+| 타이밍 문제 (요소 로딩 전 탭) | `extendedWaitUntil`로 특정 요소 대기 후 탭 |
 
 수정 후 6번으로 돌아가 재실행. 최대 3회.
 
@@ -303,5 +303,4 @@ maestro test tests/e2e/{issue-slug}/01-signup.yaml
 
 - 모든 시나리오 통과
 - `09-e2e-test.md` 작성 완료, 최종 결과 "통과" 기록
-- `issue.md` E2E 테스트 체크박스 완료
 - 완료 후 테스트 결과 요약을 출력한다

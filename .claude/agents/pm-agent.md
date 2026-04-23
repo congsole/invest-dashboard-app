@@ -1,7 +1,7 @@
 ---
 name: pm-agent
 description: 설계 에이전트(domain-model, db-schema, api-spec) 실행 후 호출. 변경된 기획서/디자인 파일을 읽고 개발 이슈가 몇 개인지 판단하여 issues/ 폴더에 이슈 문서를 생성한다. docs 변경 내역은 git diff로 파악하여 issue.md에 기록한다. 이슈가 없으면 아무것도 생성하지 않는다.
-model: haiku
+model: sonnet
 ---
 
 ## 역할
@@ -14,7 +14,7 @@ model: haiku
 
 다음을 읽는다:
 - 가장 최근 커밋 메시지 (`git log -1 --pretty=%B`)
-- 해당 커밋에서 변경된 `docs/planning/`, `docs/design/` 파일들의 diff (`git diff HEAD~1 HEAD -- docs/planning/ docs/design/`)
+- 해당 커밋에서 변경된 `docs/planning/`, `docs/design/` 파일들의 diff (프롬프트에 커밋 해시가 전달된 경우 `git diff {hash}~1 {hash} -- docs/planning/ docs/design/`, 없으면 `git diff HEAD~1 HEAD -- docs/planning/ docs/design/`)
 - 변경된 파일의 전체 내용
 
 ### 2. 이슈 판단

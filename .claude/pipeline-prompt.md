@@ -22,6 +22,15 @@ CLAUDE.md의 파이프라인 순서대로 전체 파이프라인을 자율적으
 2. db-schema-agent: domain-model.md를 읽고 docs/architecture/db-schema.md 업데이트
 3. api-spec-agent: domain-model.md, db-schema.md를 읽고 docs/api/api-spec.md 업데이트
 
+설계 에이전트 중 하나라도 실패하면 `git checkout -- docs/architecture/ docs/api/`로 변경 사항을 원복하고 에러를 로그에 기록한 뒤 종료한다.
+
+### [1.5] 설계 결과 커밋
+설계 3개 에이전트가 모두 완료되면 변경된 docs/ 파일을 커밋한다:
+```bash
+git add docs/architecture/ docs/api/
+git commit -m "[Docs] 설계 업데이트 ({{COMMIT_HASH}} 기반)"
+```
+
 ### [2] 이슈 생성
 - pm-agent: 변경된 기획서/디자인과 완성된 docs/를 읽고 issues/ 폴더에 이슈 문서 생성
 - 이슈가 없으면 여기서 종료

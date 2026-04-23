@@ -52,7 +52,12 @@ app/
 - CSS `px` 단위 → 그대로 사용 (RN은 dp 단위, 비율 유지)
 - CSS `color`, `backgroundColor`, `borderRadius` 등 → StyleSheet로 직접 변환
 
-#### 3-3. 컴포넌트 작성 규칙
+#### 3-3. 파일 소유권 (BE/FE 병렬 충돌 방지)
+- **수정 가능**: `app/screens/`, `app/components/`, `app/hooks/`
+- **읽기/import만 허용, 수정 금지**: `app/services/`, `app/supabase/`, `app/types/`
+  - 이 디렉토리는 supabase-impl-agent가 소유하며, FE는 import만 한다
+
+#### 3-4. 컴포넌트 작성 규칙
 - 언어: TypeScript, `any` 사용 금지
 - 스타일: `StyleSheet.create()` 사용, 인라인 스타일 지양
 - API 호출: `app/services/` 의 서비스 함수 사용 (supabase-impl-agent가 작성한 함수)

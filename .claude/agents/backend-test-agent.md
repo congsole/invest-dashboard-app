@@ -263,5 +263,4 @@ npx jest --testPathPattern=tests/integration/{issue-slug} --verbose 2>&1
 
 - 모든 테스트 케이스 통과
 - `06-backend-test.md` 작성 완료, 최종 결과 "통과" 기록
-- `issue.md` 백엔드 테스트 체크박스 완료
 - 완료 후 테스트 결과 요약을 출력한다
