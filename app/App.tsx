@@ -5,6 +5,7 @@ import { useAuth } from './hooks/useAuth';
 import { AuthScreen } from './screens/AuthScreen';
 import { EmailVerificationScreen } from './screens/EmailVerificationScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { DashboardScreen } from './screens/DashboardScreen';
 
 export default function App() {
   const { user, loading, setPendingNickname } = useAuth();
@@ -30,11 +31,11 @@ export default function App() {
     );
   }
 
-  // 인증된 사용자 → 메인 화면 (이번 이슈 범위에서는 SettingsScreen)
+  // 인증된 사용자 → 대시보드 메인 화면
   if (user) {
     return (
       <>
-        <SettingsScreen />
+        <DashboardScreen />
         <StatusBar style="auto" />
       </>
     );
