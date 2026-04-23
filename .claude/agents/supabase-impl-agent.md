@@ -83,7 +83,7 @@ export async function {functionName}({params}: {ParamType}): Promise<{ReturnType
 ```
 
 규칙:
-- 함수마다 에러는 throw하고 호출부에서 처리
+- 함수마다 에러는 HTTP 상태코드·응답 바디를 포함해 상세히 throw한다. `Promise.all` 병렬 호출 시 `.catch`로 출처를 명시한다. 디버깅용 임시 코드가 아닌 영구 코드로 작성한다.
 - 타입은 명시적으로 정의 (`interface` 또는 `type`)
 - `any` 사용 금지
 - **수정 가능**: `app/services/`, `app/supabase/`, `app/types/`
