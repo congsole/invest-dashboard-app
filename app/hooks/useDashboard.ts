@@ -47,9 +47,9 @@ export function useDashboard(assetType: AssetType | null): UseDashboardResult {
     try {
       // 병렬로 데이터 패칭
       const [summary, sector, rate] = await Promise.all([
-        getDashboardPortfolioSummary(assetType),
-        getSectorAllocation(),
-        getExchangeRate(),
+        getDashboardPortfolioSummary(assetType).catch((e) => { throw new Error(`[portfolio] ${e?.message}`); }),
+        getSectorAllocation().catch((e) => { throw new Error(`[sector] ${e?.message}`); }),
+        getExchangeRate().catch((e) => { throw new Error(`[exchange-rate] ${e?.message}`); }),
       ]);
 
       setSectorAllocation(sector);

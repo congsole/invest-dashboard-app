@@ -1,5 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createRemoteJWKSet, jwtVerify } from 'https://deno.land/x/jose@v5.2.3/index.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -134,30 +134,28 @@ async function fetchCryptoPrices(
   return result;
 }
 
+const JWKS = createRemoteJWKSet(
+  new URL(`${Deno.env.get('SUPABASE_URL')}/auth/v1/.well-known/jwks.json`),
+);
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  // 인증 확인
   const authHeader = req.headers.get('Authorization');
-  if (!authHeader) {
+  const token = authHeader?.replace('Bearer ', '');
+  if (!token) {
     return new Response(
       JSON.stringify({ error: { code: '401', message: '인증 토큰이 없습니다.' } }),
       { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   }
-
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) {
+  try {
+    await jwtVerify(token, JWKS);
+  } catch (err) {
     return new Response(
-      JSON.stringify({ error: { code: '401', message: '유효하지 않은 토큰입니다.' } }),
+      JSON.stringify({ error: { code: '401', message: `유효하지 않은 토큰입니다: ${err instanceof Error ? err.message : err}` } }),
       { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   }

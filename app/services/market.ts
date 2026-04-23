@@ -42,6 +42,13 @@ export async function getExchangeRate(
     body: { from, to },
   });
 
-  if (error) throw error;
+  if (error) {
+    const context = (error as any).context;
+    if (context) {
+      const text = await context.text?.() ?? '';
+      throw new Error(`${error.message} | status: ${context.status} | body: ${text}`);
+    }
+    throw error;
+  }
   return data as ExchangeRateResponse;
 }

@@ -608,7 +608,7 @@ Array<{
 
 - **방식**: RPC (Edge Function)
 - **호출**: `supabase.functions.invoke('get-market-prices', { body: { tickers } })`
-- **인증**: 필요
+- **인증**: 필요 — `supabase.functions.invoke`가 JWT를 Authorization 헤더에 자동 포함. Edge Function 내부에서 `jose` 라이브러리로 ES256 서명 검증 (Supabase JWKS 엔드포인트 사용). 외부 API 호출 시 JWT 미전달. — `supabase.functions.invoke`가 로그인 세션의 JWT를 Authorization 헤더에 자동 포함. Edge Function 내부에서 별도 검증 없이 헤더 존재 여부로 확인. JWT 서명 검증은 수행하지 않음.
 
 **요청 파라미터**
 | 파라미터 | 타입 | 필수 | 설명 |
@@ -644,7 +644,7 @@ ExchangeRate-API를 호출하여 USD/KRW 환율을 반환한다. 1시간 캐시.
 
 - **방식**: RPC (Edge Function)
 - **호출**: `supabase.functions.invoke('get-exchange-rate', { body: { from, to } })`
-- **인증**: 필요
+- **인증**: 필요 — `supabase.functions.invoke`가 JWT를 Authorization 헤더에 자동 포함. Edge Function 내부에서 `jose` 라이브러리로 ES256 서명 검증 (Supabase JWKS 엔드포인트 사용). 외부 API 호출 시 JWT 미전달.
 
 **요청 파라미터**
 | 파라미터 | 타입 | 필수 | 설명 |
@@ -679,3 +679,4 @@ ExchangeRate-API를 호출하여 USD/KRW 환율을 반환한다. 1시간 캐시.
 | [001] 사용자 인증 | Auth 도메인 추가 (signup, createProfile, signIn, signOut, getSession, onAuthStateChange) |
 | [002] 이메일 인증 플로우 | Auth — resendVerificationEmail 추가. createProfile 호출 시점을 이메일 인증 완료 후로 명확화. |
 | [003] 메인 대시보드 | TradeEvent 도메인 추가 (목록 조회, 등록, 수정, 삭제, CSV 업로드 미리보기, CSV 확정 저장). CashBalance 도메인 추가 (목록 조회, 스냅샷 등록). Dashboard 집계 도메인 추가 (포트폴리오 요약, 자산 히스토리, 부문별 비중). Market 도메인 추가 (현재가 조회, 환율 조회). |
+| [핫픽스] Market Edge Function 인증 | Supabase 프로젝트가 ES256 JWT를 사용하나 플랫폼 레벨 검증이 미지원. `--no-verify-jwt`로 게이트웨이 검증 비활성화 후 `jose` 라이브러리로 함수 내부에서 ES256 직접 검증하도록 변경. |
