@@ -20,34 +20,41 @@ interface UseDashboardResult {
   sectorAllocation: SectorAllocationItem[];
   exchangeRate: ExchangeRateResponse | null;
   totalAssetKrw: number;
-  loading: boolean;
+  initialLoading: boolean;
+  refreshing: boolean;
   historyLoading: boolean;
   error: string | null;
   refetch: () => void;
-  fetchHistory: (period: Period) => void;
+  fetchHistory: (period: Period, assetType?: AssetType | null) => void;
 }
 
 /**
  * 대시보드에 필요한 모든 데이터를 패칭하고 HoldingCardData로 조합하는 훅.
+ * 항상 전체 데이터를 패칭한다. 탭 필터링은 호출부에서 클라이언트 사이드로 처리한다.
  */
-export function useDashboard(assetType: AssetType | null): UseDashboardResult {
+export function useDashboard(): UseDashboardResult {
   const [holdings, setHoldings] = useState<HoldingCardData[]>([]);
   const [assetHistory, setAssetHistory] = useState<AssetHistoryItem[]>([]);
   const [sectorAllocation, setSectorAllocation] = useState<SectorAllocationItem[]>([]);
   const [exchangeRate, setExchangeRate] = useState<ExchangeRateResponse | null>(null);
   const [totalAssetKrw, setTotalAssetKrw] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (isRefresh = false) => {
+    if (isRefresh) {
+      setRefreshing(true);
+    } else {
+      setInitialLoading(true);
+    }
     setError(null);
 
     try {
-      // 병렬로 데이터 패칭
+      // 병렬로 데이터 패칭 (전체 부문, assetType 필터 없음)
       const [summary, sector, rate] = await Promise.all([
-        getDashboardPortfolioSummary(assetType).catch((e) => { throw new Error(`[portfolio] ${e?.message}`); }),
+        getDashboardPortfolioSummary(null).catch((e) => { throw new Error(`[portfolio] ${e?.message}`); }),
         getSectorAllocation().catch((e) => { throw new Error(`[sector] ${e?.message}`); }),
         getExchangeRate().catch((e) => { throw new Error(`[exchange-rate] ${e?.message}`); }),
       ]);
@@ -74,7 +81,6 @@ export function useDashboard(assetType: AssetType | null): UseDashboardResult {
         const priceData = priceMap.get(item.ticker) ?? null;
         const isKrw = item.asset_type === 'korean_stock';
 
-        // 원화 환산 현재가
         const currentPriceKrw =
           priceData !== null
             ? isKrw
@@ -85,22 +91,18 @@ export function useDashboard(assetType: AssetType | null): UseDashboardResult {
         const currentPriceUsd =
           priceData !== null && !isKrw ? priceData.price : null;
 
-        // 평균매수가 원화 환산
         const avgBuyPriceKrw = isKrw
           ? item.avg_buy_price
           : item.avg_buy_price * rate.rate;
 
-        // 평가금액 (원화)
         const evaluatedAmount =
           currentPriceKrw !== null ? currentPriceKrw * item.quantity : null;
 
-        // 수익률
         const profitRate =
           currentPriceKrw !== null && avgBuyPriceKrw > 0
             ? ((currentPriceKrw - avgBuyPriceKrw) / avgBuyPriceKrw) * 100
             : null;
 
-        // 평가손익 (원화)
         const investedKrw = isKrw
           ? Math.abs(item.total_invested)
           : Math.abs(item.total_invested) * rate.rate;
@@ -128,7 +130,7 @@ export function useDashboard(assetType: AssetType | null): UseDashboardResult {
         };
       });
 
-      // 총 자산 (원화 합산)
+      // 총 자산 (전체 원화 합산)
       const total = holdingCards.reduce(
         (acc, card) => acc + (card.evaluated_amount ?? card.total_invested),
         0,
@@ -139,24 +141,24 @@ export function useDashboard(assetType: AssetType | null): UseDashboardResult {
       const msg = e instanceof Error ? e.message : '데이터를 불러오지 못했습니다';
       setError(msg);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setRefreshing(false);
     }
-  }, [assetType]);
+  }, []);
 
   const fetchHistory = useCallback(
-    async (period: Period) => {
+    async (period: Period, assetType: AssetType | null = null) => {
       setHistoryLoading(true);
       try {
         const data = await getAssetHistory(period, assetType);
         setAssetHistory(data);
       } catch (e) {
-        // 히스토리 에러는 메인 에러와 분리
         console.warn('히스토리 로드 오류:', e);
       } finally {
         setHistoryLoading(false);
       }
     },
-    [assetType],
+    [],
   );
 
   useEffect(() => {
@@ -173,10 +175,11 @@ export function useDashboard(assetType: AssetType | null): UseDashboardResult {
     sectorAllocation,
     exchangeRate,
     totalAssetKrw,
-    loading,
+    initialLoading,
+    refreshing,
     historyLoading,
     error,
-    refetch: fetchData,
+    refetch: () => fetchData(true),
     fetchHistory,
   };
 }

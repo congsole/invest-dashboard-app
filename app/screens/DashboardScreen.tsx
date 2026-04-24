@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -54,33 +54,52 @@ function formatKrwShort(value: number): string {
 
 export function DashboardScreen() {
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
+  const [selectedPeriod, setSelectedPeriod] = useState<Period>('month');
   const [sheetVisible, setSheetVisible] = useState(false);
 
-  // FilterTab → AssetType | null 변환
-  const assetType: AssetType | null = filterTab === 'all' ? null : filterTab;
-
   const {
-    holdings,
+    holdings: allHoldings,
     assetHistory,
     sectorAllocation,
     exchangeRate,
     totalAssetKrw,
-    loading,
+    initialLoading,
+    refreshing,
     historyLoading,
     error,
     refetch,
     fetchHistory,
-  } = useDashboard(assetType);
+  } = useDashboard();
 
-  const handleFilterChange = useCallback((tab: FilterTab) => {
-    setFilterTab(tab);
-  }, []);
+  // 탭 필터는 클라이언트 사이드로 처리 — 네트워크 재호출 없음
+  const filteredHoldings = useMemo(
+    () =>
+      filterTab === 'all'
+        ? allHoldings
+        : allHoldings.filter((h) => h.asset_type === filterTab),
+    [allHoldings, filterTab],
+  );
+
+  const grouped = useMemo(() => groupHoldings(filteredHoldings), [filteredHoldings]);
+
+  const assetType: AssetType | null = filterTab === 'all' ? null : filterTab;
+
+  const handleFilterChange = useCallback(
+    (tab: FilterTab) => {
+      setFilterTab(tab);
+      // 차트는 서버 집계가 필요하므로 히스토리만 재조회 (기존 콘텐츠 유지)
+      const newAssetType = tab === 'all' ? null : tab;
+      fetchHistory(selectedPeriod, newAssetType);
+    },
+    [fetchHistory, selectedPeriod],
+  );
 
   const handlePeriodChange = useCallback(
     (period: Period) => {
-      fetchHistory(period);
+      setSelectedPeriod(period);
+      fetchHistory(period, assetType);
     },
-    [fetchHistory],
+    [fetchHistory, assetType],
   );
 
   const handleTradeSuccess = useCallback(() => {
@@ -88,10 +107,8 @@ export function DashboardScreen() {
     refetch();
   }, [refetch]);
 
-  const grouped = groupHoldings(holdings);
-
-  // ── 로딩 화면 ──
-  if (loading) {
+  // ── 초기 로딩 화면 (마운트 최초 1회만) ──
+  if (initialLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#003ec7" />
@@ -126,7 +143,7 @@ export function DashboardScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={loading}
+            refreshing={refreshing}
             onRefresh={refetch}
             tintColor="#003ec7"
           />
@@ -168,7 +185,7 @@ export function DashboardScreen() {
         <View style={styles.holdingsSection}>
           <Text style={styles.holdingsTitle}>보유 종목</Text>
 
-          {holdings.length === 0 ? (
+          {filteredHoldings.length === 0 ? (
             <View style={styles.emptyHoldings}>
               <Text style={styles.emptyText}>보유 종목이 없습니다</Text>
               <Text style={styles.emptySubText}>
