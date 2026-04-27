@@ -1,28 +1,25 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { HoldingCardData, AssetType } from '../types/dashboard';
 
-interface HoldingCardProps {
-  data: HoldingCardData;
-}
+// ────────────────────────────────────────────
+// 상수
+// ────────────────────────────────────────────
 
 const ASSET_TYPE_BADGE: Record<AssetType, { label: string; bg: string; text: string }> = {
   korean_stock: { label: '한국주식', bg: '#d6e3fb', text: '#586579' },
-  us_stock: { label: '미국주식', bg: '#d6e3fb', text: '#586579' },
+  us_stock: { label: '미국주식', bg: '#dde1ff', text: '#0038b6' },
   crypto: { label: '코인', bg: '#e5eeff', text: '#434656' },
 };
 
-function formatKrw(value: number): string {
-  if (value >= 100000000) return `${(value / 100000000).toFixed(2)}억원`;
-  if (value >= 10000) return `${Math.round(value / 10000).toLocaleString('ko-KR')}만원`;
-  return `${Math.round(value).toLocaleString('ko-KR')}원`;
-}
+// ────────────────────────────────────────────
+// 포맷 유틸
+// ────────────────────────────────────────────
 
-function formatPrice(value: number, currency: string): string {
-  if (currency === 'KRW') {
-    return `₩${Math.round(value).toLocaleString('ko-KR')}`;
-  }
-  return `$${value.toFixed(2)}`;
+function formatKrw(value: number): string {
+  if (Math.abs(value) >= 100_000_000) return `${(value / 100_000_000).toFixed(2)}억원`;
+  if (Math.abs(value) >= 10_000) return `${Math.round(value / 10_000).toLocaleString('ko-KR')}만원`;
+  return `${Math.round(value).toLocaleString('ko-KR')}원`;
 }
 
 function formatQuantity(quantity: number): string {
@@ -30,16 +27,33 @@ function formatQuantity(quantity: number): string {
   return quantity.toFixed(4);
 }
 
-export function HoldingCard({ data }: HoldingCardProps) {
+/**
+ * 원 통화 표시 (KRW이면 ₩, USD이면 $, 코인이면 코인티커 없이 숫자)
+ */
+function formatOrigPrice(value: number, currency: string): string {
+  if (currency === 'KRW') return `₩${Math.round(value).toLocaleString('ko-KR')}`;
+  if (currency === 'USD') return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // 코인: 소수점 8자리까지
+  return value.toFixed(6).replace(/\.?0+$/, '');
+}
+
+// ────────────────────────────────────────────
+// 컴포넌트
+// ────────────────────────────────────────────
+
+interface HoldingCardProps {
+  data: HoldingCardData;
+}
+
+export const HoldingCard = memo(function HoldingCard({ data }: HoldingCardProps) {
   const badge = ASSET_TYPE_BADGE[data.asset_type];
+  const isKrw = data.asset_type === 'korean_stock';
   const isProfitable = data.profit_rate !== null && data.profit_rate >= 0;
   const profitColor = data.profit_rate === null
     ? '#434656'
     : isProfitable
     ? '#005b21'
     : '#ba1a1a';
-
-  const isKrw = data.asset_type === 'korean_stock';
 
   return (
     <View style={styles.card}>
@@ -75,7 +89,7 @@ export function HoldingCard({ data }: HoldingCardProps) {
           ) : (
             <Text style={styles.noData}>—</Text>
           )}
-          {data.profit_rate !== null && data.profit_amount !== null ? (
+          {data.profit_rate !== null ? (
             <Text style={[styles.profitRate, { color: profitColor }]}>
               {isProfitable ? '+' : ''}
               {data.profit_rate.toFixed(2)}%
@@ -90,14 +104,13 @@ export function HoldingCard({ data }: HoldingCardProps) {
         </View>
       </View>
 
-      {/* 구분선 역할: 배경색 변화로 처리 */}
+      {/* 상세 정보 (배경색 구분) */}
       <View style={styles.detailSection}>
+        {/* 평균 매수가 */}
         <View style={styles.detailItem}>
           <Text style={styles.detailLabel}>평균매수가</Text>
           <Text style={styles.detailValue}>
-            {isKrw
-              ? `₩${Math.round(data.avg_buy_price).toLocaleString('ko-KR')}`
-              : `$${data.avg_buy_price.toFixed(2)}`}
+            {formatOrigPrice(data.avg_buy_price, data.currency)}
           </Text>
           {!isKrw && (
             <Text style={styles.detailSubValue}>
@@ -106,19 +119,19 @@ export function HoldingCard({ data }: HoldingCardProps) {
           )}
         </View>
 
+        {/* 보유수량 */}
         <View style={styles.detailItem}>
           <Text style={styles.detailLabel}>보유수량</Text>
           <Text style={styles.detailValue}>{formatQuantity(data.quantity)}</Text>
         </View>
 
+        {/* 현재가 */}
         <View style={[styles.detailItem, styles.detailItemRight]}>
           <Text style={styles.detailLabel}>현재가</Text>
-          {data.current_price !== null ? (
+          {data.current_price !== null && data.current_price_orig !== null ? (
             <>
               <Text style={[styles.detailValue, styles.currentPriceText]}>
-                {isKrw
-                  ? `₩${Math.round(data.current_price).toLocaleString('ko-KR')}`
-                  : `$${data.current_price_usd?.toFixed(2) ?? '—'}`}
+                {formatOrigPrice(data.current_price_orig, data.currency)}
               </Text>
               {!isKrw && (
                 <Text style={styles.detailSubValue}>
@@ -135,12 +148,21 @@ export function HoldingCard({ data }: HoldingCardProps) {
       {/* 캐시 데이터 경고 */}
       {data.is_price_cached && data.price_fetched_at && (
         <Text style={styles.cachedNote}>
-          * 캐시 데이터 기준 ({new Date(data.price_fetched_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })})
+          * 캐시 데이터 기준 (
+          {new Date(data.price_fetched_at).toLocaleTimeString('ko-KR', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+          )
         </Text>
       )}
     </View>
   );
-}
+});
+
+// ────────────────────────────────────────────
+// 스타일
+// ────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   card: {
