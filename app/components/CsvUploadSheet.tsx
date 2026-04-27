@@ -12,11 +12,11 @@ import {
   Alert,
 } from 'react-native';
 import { Colors } from '../types/colors';
-import { CsvPreviewRow, CsvPreviewResult } from '../types/tradeEvent';
-import { confirmTradeCSV } from '../services/tradeEvents';
+import { CsvPreviewRow, CsvPreviewResult } from '../types/accountEvent';
+import { confirmAccountCsv } from '../services/accountEvents';
 
 // ────────────────────────────────────────────
-// 타입
+// 상수
 // ────────────────────────────────────────────
 
 interface CsvUploadSheetProps {
@@ -30,15 +30,19 @@ type Step = 'upload' | 'preview' | 'confirming';
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.88;
 
+const EVENT_TYPE_KO: Record<string, string> = {
+  buy: '매수',
+  sell: '매도',
+  deposit: '입금',
+  withdraw: '출금',
+  dividend: '배당',
+};
+
 const ASSET_TYPE_KO: Record<string, string> = {
   korean_stock: '한국주식',
   us_stock: '미국주식',
   crypto: '코인',
-};
-
-const TRADE_TYPE_KO: Record<string, string> = {
-  buy: '매수',
-  sell: '매도',
+  cash: '현금',
 };
 
 // ────────────────────────────────────────────
@@ -79,78 +83,88 @@ export function CsvUploadSheet({ visible, onClose, onSuccess }: CsvUploadSheetPr
     onClose();
   };
 
-  // 파일 선택 (expo-document-picker 없이 시뮬레이션)
-  // 실제 구현에서는 expo-document-picker를 사용해야 한다.
-  // 현재는 파일 선택 UI만 제공하고, 실제 파일 선택 기능은 TODO 처리
+  // expo-document-picker 미설치 환경에서 Mock 데이터로 테스트
   const handleSelectFile = async () => {
-    // TODO: expo-document-picker로 CSV 파일 선택
-    // 현재 expo-document-picker가 dependencies에 없으므로
-    // Alert으로 안내 후 mock 데이터로 UI 테스트 가능하도록 처리
-
     Alert.alert(
       'CSV 파일 선택',
-      'expo-document-picker 설치 후 실제 파일 선택이 가능합니다.\n\n개발 테스트를 위해 mock 데이터를 로드하시겠습니까?',
+      'expo-document-picker 설치 후 실제 파일 선택이 가능합니다.\n개발 테스트를 위해 Mock 데이터를 로드하시겠습니까?',
       [
         { text: '취소', style: 'cancel' },
-        {
-          text: 'Mock 데이터 로드',
-          onPress: () => handleMockUpload(),
-        },
-      ]
+        { text: 'Mock 데이터 로드', onPress: handleMockUpload },
+      ],
     );
   };
 
-  // Mock 업로드 (개발 테스트용)
   const handleMockUpload = async () => {
     setUploading(true);
     setError(null);
     try {
-      // Mock 파싱 결과
       const mockResult: CsvPreviewResult = {
         preview: [
           {
             row: 2,
+            event_type: 'buy',
+            event_date: '2024-01-15',
             asset_type: 'korean_stock',
-            trade_type: 'buy',
             ticker: '005930',
             name: '삼성전자',
-            trade_date: '2024-01-15',
             quantity: 10,
             price_per_unit: 72000,
             currency: 'KRW',
             fee: 360,
             fee_currency: 'KRW',
             tax: 0,
-            settlement_amount: -720360,
+            amount: -720360,
+            fx_rate_at_event: null,
+            external_ref: 'mock-hash-001',
           },
           {
             row: 3,
+            event_type: 'buy',
+            event_date: '2024-01-20',
             asset_type: 'us_stock',
-            trade_type: 'buy',
             ticker: 'AAPL',
             name: 'Apple Inc.',
-            trade_date: '2024-01-20',
             quantity: 5,
             price_per_unit: 185.5,
             currency: 'USD',
             fee: 1.5,
             fee_currency: 'USD',
             tax: 0,
-            settlement_amount: -929,
+            amount: -929,
+            fx_rate_at_event: 1385.5,
+            external_ref: 'mock-hash-002',
+          },
+          {
+            row: 4,
+            event_type: 'deposit',
+            event_date: '2024-01-10',
+            asset_type: null,
+            ticker: null,
+            name: null,
+            quantity: null,
+            price_per_unit: null,
+            currency: 'KRW',
+            fee: 0,
+            fee_currency: null,
+            tax: 0,
+            amount: 5000000,
+            fx_rate_at_event: 1,
+            external_ref: 'mock-hash-003',
           },
         ],
         errors: [
           {
-            row: 4,
+            row: 5,
             reason: '체결가 형식 오류: "N/A" 는 숫자가 아닙니다',
           },
         ],
-        total_rows: 3,
-        parsed_rows: 2,
+        total_rows: 4,
+        parsed_rows: 3,
         failed_rows: 1,
       };
 
-      setSelectedFileName('broker_trades_2024.csv');
+      setSelectedFileName('broker_transactions_2024.csv');
       setPreviewResult(mockResult);
       setStep('preview');
     } catch (err) {
@@ -166,25 +180,19 @@ export function CsvUploadSheet({ visible, onClose, onSuccess }: CsvUploadSheetPr
     setConfirming(true);
     setError(null);
     try {
-      const result = await confirmTradeCSV(previewResult.preview);
+      const result = await confirmAccountCsv(previewResult.preview);
 
-      if (result.failed.length > 0) {
-        Alert.alert(
-          '일부 저장 실패',
-          `${result.inserted}건 저장 성공\n${result.failed.length}건 실패\n\n` +
-            result.failed.map((f) => `행 ${f.row}: ${f.reason}`).join('\n'),
-          [
-            {
-              text: '확인',
-              onPress: () => {
-                onSuccess?.();
-                handleClose();
-              },
-            },
-          ]
-        );
-      } else {
-        Alert.alert('저장 완료', `${result.inserted}건이 성공적으로 저장되었습니다.`, [
+      const skippedMsg = result.skipped > 0 ? `\n${result.skipped}건 중복 건너뜀` : '';
+      const failedMsg =
+        result.failed.length > 0
+          ? `\n${result.failed.length}건 실패:\n` +
+            result.failed.map((f) => `행 ${f.row}: ${f.reason}`).join('\n')
+          : '';
+
+      Alert.alert(
+        result.failed.length > 0 ? '일부 저장 실패' : '저장 완료',
+        `${result.inserted}건 저장 성공${skippedMsg}${failedMsg}`,
+        [
           {
             text: '확인',
             onPress: () => {
@@ -192,8 +200,8 @@ export function CsvUploadSheet({ visible, onClose, onSuccess }: CsvUploadSheetPr
               handleClose();
             },
           },
-        ]);
-      }
+        ],
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : '저장에 실패했습니다');
     } finally {
@@ -205,14 +213,9 @@ export function CsvUploadSheet({ visible, onClose, onSuccess }: CsvUploadSheetPr
 
   return (
     <Modal transparent animationType="none" visible={visible} onRequestClose={handleClose}>
-      {/* 백드롭 */}
       <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={handleClose} />
 
-      {/* 바텀시트 */}
-      <Animated.View
-        style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
-      >
-        {/* 핸들바 */}
+      <Animated.View style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}>
         <View style={styles.handlebarContainer}>
           <View style={styles.handlebar} />
         </View>
@@ -262,12 +265,7 @@ export function CsvUploadSheet({ visible, onClose, onSuccess }: CsvUploadSheetPr
           </View>
           <View style={styles.stepLabels}>
             <Text style={[styles.stepLabel, styles.stepLabelActive]}>파일 선택</Text>
-            <Text
-              style={[
-                styles.stepLabel,
-                step === 'preview' && styles.stepLabelActive,
-              ]}
-            >
+            <Text style={[styles.stepLabel, step === 'preview' && styles.stepLabelActive]}>
               미리보기
             </Text>
             <Text style={styles.stepLabel}>저장 완료</Text>
@@ -282,6 +280,7 @@ export function CsvUploadSheet({ visible, onClose, onSuccess }: CsvUploadSheetPr
               <Text style={styles.uploadTitle}>CSV 파일을 선택하세요</Text>
               <Text style={styles.uploadDescription}>
                 증권사에서 내보낸 거래내역 CSV 파일을 지원합니다.{'\n'}
+                토스·삼성·카카오페이증권·업비트의 "전체 거래내역" CSV 포맷 지원.{'\n'}
                 서버에서 자동으로 포맷을 감지합니다.
               </Text>
               <TouchableOpacity
@@ -332,7 +331,7 @@ export function CsvUploadSheet({ visible, onClose, onSuccess }: CsvUploadSheetPr
                 </View>
               </View>
 
-              {/* 실패 행 표시 */}
+              {/* 실패 행 */}
               {previewResult.errors.length > 0 && (
                 <View style={styles.errorsSection}>
                   <Text style={styles.sectionTitle}>파싱 실패 행</Text>
@@ -405,7 +404,7 @@ export function CsvUploadSheet({ visible, onClose, onSuccess }: CsvUploadSheetPr
 }
 
 // ────────────────────────────────────────────
-// 미리보기 행 카드
+// 미리보기 행 카드 (account_events 구조 기반)
 // ────────────────────────────────────────────
 
 interface PreviewRowCardProps {
@@ -413,58 +412,64 @@ interface PreviewRowCardProps {
 }
 
 function PreviewRowCard({ row }: PreviewRowCardProps) {
-  const isPositive = row.settlement_amount >= 0;
+  const isBuy = row.event_type === 'buy';
+  const isSell = row.event_type === 'sell';
+  const isPositive = row.amount >= 0;
+
+  const eventTypeBg = isBuy
+    ? `${Colors.tertiary}1A`
+    : isSell
+    ? `${Colors.error}1A`
+    : '#eff4ff';
+  const eventTypeText = isBuy ? Colors.tertiary : isSell ? Colors.error : '#434656';
+
   return (
     <View style={previewCardStyles.card}>
       <View style={previewCardStyles.header}>
         <View style={previewCardStyles.headerLeft}>
-          <Text style={previewCardStyles.ticker}>{row.ticker}</Text>
-          <Text style={previewCardStyles.name}>{row.name}</Text>
+          <Text style={previewCardStyles.ticker}>
+            {row.ticker ?? EVENT_TYPE_KO[row.event_type]}
+          </Text>
+          <Text style={previewCardStyles.name}>
+            {row.name ?? row.event_date}
+          </Text>
         </View>
         <View style={previewCardStyles.badges}>
-          <View
-            style={[
-              previewCardStyles.badge,
-              row.trade_type === 'buy'
-                ? previewCardStyles.buyBadge
-                : previewCardStyles.sellBadge,
-            ]}
-          >
-            <Text
-              style={[
-                previewCardStyles.badgeText,
-                row.trade_type === 'buy'
-                  ? previewCardStyles.buyBadgeText
-                  : previewCardStyles.sellBadgeText,
-              ]}
-            >
-              {TRADE_TYPE_KO[row.trade_type]}
+          <View style={[previewCardStyles.badge, { backgroundColor: eventTypeBg }]}>
+            <Text style={[previewCardStyles.badgeText, { color: eventTypeText }]}>
+              {EVENT_TYPE_KO[row.event_type]}
             </Text>
           </View>
-          <View style={previewCardStyles.assetBadge}>
-            <Text style={previewCardStyles.assetBadgeText}>
-              {ASSET_TYPE_KO[row.asset_type]}
-            </Text>
-          </View>
+          {row.asset_type && (
+            <View style={previewCardStyles.assetBadge}>
+              <Text style={previewCardStyles.assetBadgeText}>
+                {ASSET_TYPE_KO[row.asset_type] ?? row.asset_type}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
       <View style={previewCardStyles.details}>
         <View style={previewCardStyles.detail}>
           <Text style={previewCardStyles.detailLabel}>날짜</Text>
-          <Text style={previewCardStyles.detailValue}>{row.trade_date}</Text>
+          <Text style={previewCardStyles.detailValue}>{row.event_date}</Text>
         </View>
+        {row.quantity != null && (
+          <View style={previewCardStyles.detail}>
+            <Text style={previewCardStyles.detailLabel}>수량</Text>
+            <Text style={previewCardStyles.detailValue}>{row.quantity.toLocaleString()}</Text>
+          </View>
+        )}
+        {row.price_per_unit != null && (
+          <View style={previewCardStyles.detail}>
+            <Text style={previewCardStyles.detailLabel}>체결가</Text>
+            <Text style={previewCardStyles.detailValue}>
+              {row.price_per_unit.toLocaleString()} {row.currency}
+            </Text>
+          </View>
+        )}
         <View style={previewCardStyles.detail}>
-          <Text style={previewCardStyles.detailLabel}>수량</Text>
-          <Text style={previewCardStyles.detailValue}>{row.quantity.toLocaleString()}</Text>
-        </View>
-        <View style={previewCardStyles.detail}>
-          <Text style={previewCardStyles.detailLabel}>체결가</Text>
-          <Text style={previewCardStyles.detailValue}>
-            {row.price_per_unit.toLocaleString()} {row.currency}
-          </Text>
-        </View>
-        <View style={previewCardStyles.detail}>
-          <Text style={previewCardStyles.detailLabel}>정산금액</Text>
+          <Text style={previewCardStyles.detailLabel}>금액</Text>
           <Text
             style={[
               previewCardStyles.detailValue,
@@ -472,7 +477,7 @@ function PreviewRowCard({ row }: PreviewRowCardProps) {
             ]}
           >
             {isPositive ? '+' : ''}
-            {row.settlement_amount.toLocaleString()} {row.currency}
+            {row.amount.toLocaleString()} {row.currency}
           </Text>
         </View>
       </View>
@@ -480,7 +485,7 @@ function PreviewRowCard({ row }: PreviewRowCardProps) {
         <View style={previewCardStyles.extras}>
           {row.fee > 0 && (
             <Text style={previewCardStyles.extraText}>
-              수수료 {row.fee.toLocaleString()} {row.fee_currency}
+              수수료 {row.fee.toLocaleString()} {row.fee_currency ?? row.currency}
             </Text>
           )}
           {row.tax > 0 && (
@@ -530,9 +535,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.outlineVariant,
     opacity: 0.4,
   },
-  scrollView: {
-    flex: 1,
-  },
+  scrollView: { flex: 1 },
   scrollContent: {
     paddingHorizontal: 24,
     paddingBottom: 48,
@@ -567,8 +570,6 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
     fontWeight: '600',
   },
-
-  // 단계 인디케이터
   stepIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -583,29 +584,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepDotActive: {
-    backgroundColor: Colors.primary,
-  },
-  stepDotDone: {
-    backgroundColor: Colors.tertiary,
-  },
+  stepDotActive: { backgroundColor: Colors.primary },
+  stepDotDone: { backgroundColor: Colors.tertiary },
   stepDotText: {
     fontSize: 12,
     fontWeight: '700',
     color: Colors.onSurfaceVariant,
   },
-  stepDotTextActive: {
-    color: Colors.onPrimary,
-  },
+  stepDotTextActive: { color: Colors.onPrimary },
   stepLine: {
     flex: 1,
     height: 2,
     backgroundColor: Colors.surfaceContainerHighest,
     marginHorizontal: 4,
   },
-  stepLineDone: {
-    backgroundColor: Colors.tertiary,
-  },
+  stepLineDone: { backgroundColor: Colors.tertiary },
   stepLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -623,8 +616,6 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '700',
   },
-
-  // 업로드 영역
   uploadArea: {
     alignItems: 'center',
     paddingVertical: 32,
@@ -638,9 +629,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 20,
   },
-  uploadIcon: {
-    fontSize: 36,
-  },
+  uploadIcon: { fontSize: 36 },
   uploadTitle: {
     fontSize: 18,
     fontWeight: '700',
@@ -674,11 +663,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-
-  // 미리보기 영역
-  previewArea: {
-    flex: 1,
-  },
+  previewArea: { flex: 1 },
   summaryCard: {
     backgroundColor: Colors.surfaceContainerLow,
     borderRadius: 20,
@@ -695,9 +680,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
   },
-  summaryStat: {
-    alignItems: 'center',
-  },
+  summaryStat: { alignItems: 'center' },
   summaryStatValue: {
     fontSize: 24,
     fontWeight: '800',
@@ -709,17 +692,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: '500',
   },
-  successColor: {
-    color: Colors.tertiary,
-  },
-  errorColor: {
-    color: Colors.error,
-  },
-
-  // 실패 행
-  errorsSection: {
-    marginBottom: 20,
-  },
+  successColor: { color: Colors.tertiary },
+  errorColor: { color: Colors.error },
+  errorsSection: { marginBottom: 20 },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
@@ -754,13 +729,7 @@ const styles = StyleSheet.create({
     color: Colors.onErrorContainer,
     lineHeight: 18,
   },
-
-  // 미리보기 섹션
-  previewSection: {
-    marginBottom: 20,
-  },
-
-  // 에러
+  previewSection: { marginBottom: 20 },
   errorContainer: {
     backgroundColor: Colors.errorContainer,
     borderRadius: 12,
@@ -772,8 +741,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
   },
-
-  // 미리보기 버튼
   previewButtons: {
     flexDirection: 'row',
     gap: 12,
@@ -833,9 +800,7 @@ const previewCardStyles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 12,
   },
-  headerLeft: {
-    flex: 1,
-  },
+  headerLeft: { flex: 1 },
   ticker: {
     fontSize: 15,
     fontWeight: '700',
@@ -855,21 +820,9 @@ const previewCardStyles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
-  buyBadge: {
-    backgroundColor: `${Colors.tertiary}1A`,
-  },
-  sellBadge: {
-    backgroundColor: `${Colors.error}1A`,
-  },
   badgeText: {
     fontSize: 11,
     fontWeight: '700',
-  },
-  buyBadgeText: {
-    color: Colors.tertiary,
-  },
-  sellBadgeText: {
-    color: Colors.error,
   },
   assetBadge: {
     backgroundColor: Colors.surfaceContainerHigh,
@@ -904,12 +857,8 @@ const previewCardStyles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.onSurface,
   },
-  positiveText: {
-    color: Colors.tertiary,
-  },
-  negativeText: {
-    color: Colors.error,
-  },
+  positiveText: { color: Colors.tertiary },
+  negativeText: { color: Colors.error },
   extras: {
     flexDirection: 'row',
     gap: 12,

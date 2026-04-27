@@ -11,15 +11,16 @@ import {
 } from 'react-native';
 import { useDashboard } from '../hooks/useDashboard';
 import { SectorFilterTabs, FilterTab } from '../components/SectorFilterTabs';
+import { KpiCardSection } from '../components/KpiCardSection';
 import { AssetHistoryChart } from '../components/AssetHistoryChart';
-import { SectorAllocationPie } from '../components/SectorAllocationPie';
 import { HoldingCard } from '../components/HoldingCard';
-import { NewTradeEventSheet } from '../components/NewTradeEventSheet';
-import { AssetType, Period, HoldingCardData } from '../types/dashboard';
+import { AccountEventBottomSheet } from '../components/AccountEventBottomSheet';
+import { AssetType, Period, HoldingCardData, KpiCardData } from '../types/dashboard';
 
 // ────────────────────────────────────────────
-// 부문별 그룹 헤더 레이블
+// 상수
 // ────────────────────────────────────────────
+
 const GROUP_LABELS: Record<AssetType, string> = {
   korean_stock: '한국주식',
   us_stock: '미국주식',
@@ -27,6 +28,10 @@ const GROUP_LABELS: Record<AssetType, string> = {
 };
 
 const GROUP_ORDER: AssetType[] = ['korean_stock', 'us_stock', 'crypto'];
+
+// ────────────────────────────────────────────
+// 유틸
+// ────────────────────────────────────────────
 
 function groupHoldings(
   holdings: HoldingCardData[],
@@ -42,11 +47,11 @@ function groupHoldings(
   }));
 }
 
-function formatKrwShort(value: number): string {
-  if (value >= 100000000) return `${(value / 100000000).toFixed(2)}억원`;
-  if (value >= 10000) return `${Math.round(value / 10000).toLocaleString('ko-KR')}만원`;
-  return `${Math.round(value).toLocaleString('ko-KR')}원`;
-}
+// ────────────────────────────────────────────
+// 부문 필터에 따른 KPI 조정 (클라이언트 사이드)
+// 2차 행 예수금은 항상 전체 표시, 배당/수수료/세금은 부문 필터 연동 불가
+// (get_kpi_summary가 부문별로 집계하므로 표시 데이터는 전체 KPI 기준으로 유지)
+// ────────────────────────────────────────────
 
 // ────────────────────────────────────────────
 // DashboardScreen
@@ -58,11 +63,11 @@ export function DashboardScreen() {
   const [sheetVisible, setSheetVisible] = useState(false);
 
   const {
+    kpi,
     holdings: allHoldings,
-    assetHistory,
-    sectorAllocation,
+    snapshots,
+    markers,
     exchangeRate,
-    totalAssetKrw,
     initialLoading,
     refreshing,
     historyLoading,
@@ -82,13 +87,11 @@ export function DashboardScreen() {
 
   const grouped = useMemo(() => groupHoldings(filteredHoldings), [filteredHoldings]);
 
-  const assetType: AssetType | null = filterTab === 'all' ? null : filterTab;
-
   const handleFilterChange = useCallback(
     (tab: FilterTab) => {
       setFilterTab(tab);
-      // 차트는 서버 집계가 필요하므로 히스토리만 재조회 (기존 콘텐츠 유지)
-      const newAssetType = tab === 'all' ? null : tab;
+      // 그래프는 서버 집계 필요 → 히스토리만 재조회 (기존 콘텐츠 유지)
+      const newAssetType = tab === 'all' ? null : (tab as AssetType);
       fetchHistory(selectedPeriod, newAssetType);
     },
     [fetchHistory, selectedPeriod],
@@ -97,12 +100,13 @@ export function DashboardScreen() {
   const handlePeriodChange = useCallback(
     (period: Period) => {
       setSelectedPeriod(period);
+      const assetType = filterTab === 'all' ? null : (filterTab as AssetType);
       fetchHistory(period, assetType);
     },
-    [fetchHistory, assetType],
+    [fetchHistory, filterTab],
   );
 
-  const handleTradeSuccess = useCallback(() => {
+  const handleEventSuccess = useCallback(() => {
     setSheetVisible(false);
     refetch();
   }, [refetch]);
@@ -122,15 +126,13 @@ export function DashboardScreen() {
       {/* 상단 헤더 */}
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.topBarSub}>TOTAL NET WORTH</Text>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalAmount}>
-              {formatKrwShort(totalAssetKrw)}
-            </Text>
-          </View>
-          {exchangeRate?.is_cached && (
+          <Text style={styles.topBarSub}>PRECISION LEDGER</Text>
+          <Text style={styles.totalAmount}>
+            {formatKrwShort(kpi.totalValueKrw)}
+          </Text>
+          {exchangeRate && (
             <Text style={styles.rateCachedNote}>
-              환율 {exchangeRate.rate.toLocaleString('ko-KR')}원 기준
+              USD/KRW {exchangeRate.rate.toLocaleString('ko-KR')}원
               {exchangeRate.is_cached ? ' (캐시)' : ''}
             </Text>
           )}
@@ -164,22 +166,21 @@ export function DashboardScreen() {
           <SectorFilterTabs selected={filterTab} onSelect={handleFilterChange} />
         </View>
 
+        {/* KPI 카드 섹션 */}
+        <View style={styles.section}>
+          <KpiCardSection data={kpi} />
+        </View>
+
         {/* 자산 히스토리 그래프 */}
         <View style={styles.section}>
           <AssetHistoryChart
-            data={assetHistory}
+            snapshots={snapshots}
+            markers={markers}
             loading={historyLoading}
+            showCashLine={filterTab === 'all'}
             onPeriodChange={handlePeriodChange}
-            exchangeRate={exchangeRate?.rate ?? 1380}
           />
         </View>
-
-        {/* 부문별 비중 파이 차트 (전체 탭일 때만 표시) */}
-        {filterTab === 'all' && sectorAllocation.length > 0 && (
-          <View style={styles.section}>
-            <SectorAllocationPie data={sectorAllocation} />
-          </View>
-        )}
 
         {/* 종목 카드 리스트 */}
         <View style={styles.holdingsSection}>
@@ -189,23 +190,16 @@ export function DashboardScreen() {
             <View style={styles.emptyHoldings}>
               <Text style={styles.emptyText}>보유 종목이 없습니다</Text>
               <Text style={styles.emptySubText}>
-                우하단 + 버튼을 눌러 매매 이벤트를 등록하세요
+                우하단 + 버튼을 눌러 계정 이벤트를 등록하세요
               </Text>
             </View>
           ) : (
             grouped.map((group) => (
               <View key={group.type} style={styles.groupBlock}>
-                {/* 그룹 헤더 */}
                 <View style={styles.groupHeader}>
-                  <Text style={styles.groupLabel}>
-                    {GROUP_LABELS[group.type]}
-                  </Text>
-                  <Text style={styles.groupCount}>
-                    {group.items.length}개 종목
-                  </Text>
+                  <Text style={styles.groupLabel}>{GROUP_LABELS[group.type]}</Text>
+                  <Text style={styles.groupCount}>{group.items.length}개 종목</Text>
                 </View>
-
-                {/* 종목 카드 목록 */}
                 {group.items.map((item) => (
                   <View key={item.ticker} style={styles.cardWrapper}>
                     <HoldingCard data={item} />
@@ -229,15 +223,33 @@ export function DashboardScreen() {
         <Text style={styles.fabIcon}>+</Text>
       </TouchableOpacity>
 
-      {/* 매매 이벤트 바텀시트 */}
-      <NewTradeEventSheet
+      {/* 계정 이벤트 바텀시트 */}
+      <AccountEventBottomSheet
         visible={sheetVisible}
         onClose={() => setSheetVisible(false)}
-        onSuccess={handleTradeSuccess}
+        onSuccess={handleEventSuccess}
       />
     </SafeAreaView>
   );
 }
+
+// ────────────────────────────────────────────
+// 포맷 유틸 (화면 내부용)
+// ────────────────────────────────────────────
+
+function formatKrwShort(value: number): string {
+  if (Math.abs(value) >= 100_000_000) {
+    return `${(value / 100_000_000).toFixed(2)}억원`;
+  }
+  if (Math.abs(value) >= 10_000) {
+    return `${Math.round(value / 10_000).toLocaleString('ko-KR')}만원`;
+  }
+  return `${Math.round(value).toLocaleString('ko-KR')}원`;
+}
+
+// ────────────────────────────────────────────
+// 스타일
+// ────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safe: {
@@ -261,26 +273,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 16,
-    borderBottomWidth: 0,
   },
   topBarSub: {
     fontSize: 10,
     fontWeight: '700',
     color: '#434656',
-    letterSpacing: 1.5,
+    letterSpacing: 2,
     textTransform: 'uppercase',
   },
-  totalRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    marginTop: 4,
-  },
   totalAmount: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: '800',
     color: '#0b1c30',
     letterSpacing: -0.5,
+    marginTop: 4,
   },
   rateCachedNote: {
     fontSize: 11,
