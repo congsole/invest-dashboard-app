@@ -5,7 +5,8 @@
 # 환경변수 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID가 설정되어 있으면 텔레그램으로 전송.
 # macOS에서는 osascript 알림도 함께 전송.
 
-ROOT=$(git rev-parse --show-toplevel 2>/dev/null || dirname "$(dirname "$0")")
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$ROOT/.env.local"
 
 # .env.local에서 환경변수 로드

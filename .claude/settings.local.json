@@ -3,7 +3,12 @@
     "allow": [
       "Bash(npm install:*)",
       "Bash(npx expo:*)",
-      "Bash(claude --version)"
+      "Bash(claude --version)",
+      "Bash(script -q .claude/pipeline.log /bin/echo \"hello\")",
+      "Bash(git:*)",
+      "Bash(script -q /tmp/test_script_exit /bin/bash -c \"exit 42\")",
+      "Bash(echo \"exit code: $?\")",
+      "Bash(bash:*)"
     ]
   }
 }
