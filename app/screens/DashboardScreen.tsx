@@ -16,6 +16,7 @@ import { AssetHistoryChart } from '../components/AssetHistoryChart';
 import { HoldingCard } from '../components/HoldingCard';
 import { AccountEventBottomSheet } from '../components/AccountEventBottomSheet';
 import { AssetType, Period, HoldingCardData, KpiCardData } from '../types/dashboard';
+import { supabase } from '../utils/supabase';
 
 // ────────────────────────────────────────────
 // 상수
@@ -121,6 +122,12 @@ export function DashboardScreen() {
     );
   }
 
+  const handleLogout = () => {
+    return supabase.auth.signOut().then((response) => {
+      return response;
+    })
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       {/* 상단 헤더 */}
@@ -137,6 +144,9 @@ export function DashboardScreen() {
             </Text>
           )}
         </View>
+        <TouchableOpacity onPress={handleLogout}>
+          <Text>로그아웃(임시)</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
