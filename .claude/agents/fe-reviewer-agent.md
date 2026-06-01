@@ -36,6 +36,9 @@ model: sonnet
 - [ ] 상태 관리: 로딩/에러 상태가 처리되어 있는가
 - [ ] 스타일: 인라인 스타일 대신 `StyleSheet.create()` 사용하는가
 - [ ] RN 규칙: 웹 전용 API 사용 여부 (`document`, `window` 등)
+- [ ] app.json 설정: scheme, bundleIdentifier, 필요한 plugins(예: expo-apple-authentication)가 설정되어 있는가
+- [ ] 의존성 교차 검증: `04-supabase-impl.md`에 명시된 FE 관련 패키지(예: expo-web-browser, expo-apple-authentication 등)가 `package.json`에 모두 설치되어 있는가
+- [ ] 딥링크/리다이렉트: OAuth 등 외부 인증 사용 시 redirect URL 패턴이 코드와 app.json scheme에서 일관되는가
 - [ ] 코드 품질: 중복 코드, 불필요한 복잡도, 컴포넌트 분리 적절성
 
 이슈가 없으면 → **합격**, 리뷰 로그 작성 후 완료

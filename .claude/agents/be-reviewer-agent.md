@@ -35,6 +35,8 @@ model: sonnet
 - [ ] TypeScript: `any` 사용 여부, 타입 누락 여부
 - [ ] 에러 처리: 모든 Supabase 호출에서 error 처리가 있는가
 - [ ] 보안: SQL 인젝션, 권한 누락 등
+- [ ] 사전 의존성: `04-supabase-impl.md`에 기록된 외부 설정(OAuth provider 활성화, Redirect URL 등록, 외부 서비스 키 설정 등)이 실제로 완료되었는지 가능한 범위에서 검증했는가 (코드에서 확인 불가한 항목은 명시적으로 목록화)
+- [ ] 패키지 의존성: `04-supabase-impl.md`에 명시된 필요 패키지가 `package.json`에 모두 설치되어 있는가
 - [ ] 코드 품질: 중복 코드, 불필요한 복잡도
 
 이슈가 없으면 → **합격**, 리뷰 로그 작성 후 완료

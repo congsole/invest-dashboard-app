@@ -128,6 +128,13 @@ supabase link --project-ref {project-ref}  # Supabase 대시보드 URL에서 확
 ## 클라이언트 유틸
 - `app/services/{domain}.ts` — {구현된 함수 목록}
 
+## 사전 의존성 체크리스트
+
+아래 항목은 코드 외부에서 수동 설정이 필요하다.
+backend-test-agent가 가능한 항목을 자동 검증하고, 불가한 항목은 사용자에게 확인을 요청한다.
+
+- [ ] {설정 항목} — {어디서 설정하는지} — {검증 방법: smoke test 가능 / 수동 확인 필요}
+
 ## 특이사항
 구현 중 발견한 이슈, 결정 사항 등
 ```
