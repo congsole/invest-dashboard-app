@@ -9,12 +9,14 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase
+      - name: Ping Supabase (DB query)
         run: |
           response=$(curl -s -o /dev/null -w "%{http_code}" \
             --connect-timeout 10 \
-            "https://wxznscebhpkfspwphbdv.supabase.co/rest/v1/" \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}") || true
+            "https://wxznscebhpkfspwphbdv.supabase.co/rest/v1/rpc/ping" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}') || true
           echo "Response: $response"
           if [ -z "$response" ] || [ "$response" = "000" ]; then
             echo "Ping failed: could not reach Supabase"
