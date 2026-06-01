@@ -1,3 +1,4 @@
+import * as Linking from 'expo-linking';
 import { supabase } from '../utils/supabase';
 
 // ────────────────────────────────────────────
@@ -41,7 +42,12 @@ export interface AuthUser {
  * 닉네임은 이메일 인증 완료(SIGNED_IN 이벤트) 후 createProfile로 저장한다.
  */
 export async function signUp({ email, password }: SignUpParams): Promise<{ user: AuthUser; needsEmailVerification: boolean }> {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const redirectTo = Linking.createURL('auth/callback');
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: redirectTo },
+  });
 
   if (error) {
     throw error;
@@ -65,7 +71,12 @@ export async function signUp({ email, password }: SignUpParams): Promise<{ user:
  * 인증 이메일 재발송: 이메일 인증 대기 중 재발송 요청.
  */
 export async function resendVerificationEmail({ email }: ResendVerificationEmailParams): Promise<void> {
-  const { error } = await supabase.auth.resend({ type: 'signup', email });
+  const redirectTo = Linking.createURL('auth/callback');
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: redirectTo },
+  });
 
   if (error) {
     throw error;
