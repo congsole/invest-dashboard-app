@@ -8,7 +8,11 @@
       "Bash(git:*)",
       "Bash(script -q /tmp/test_script_exit /bin/bash -c \"exit 42\")",
       "Bash(echo \"exit code: $?\")",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(ls -la .claude/pipeline*.log)",
+      "Bash(claude -p --output-format stream-json)",
+      "Bash(claude -p \"say hello in one word\" --output-format stream-json)",
+      "Bash(claude -p \"say hello in one word\" --output-format stream-json --verbose)"
     ]
   }
 }
