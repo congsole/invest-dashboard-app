@@ -8,6 +8,7 @@
 
 - 이메일/비밀번호 기반 회원가입 및 로그인
 - 이메일 인증 확인 후 가입 완료
+- Google / Apple 소셜 로그인 (회원가입 겸용)
 - 앱 재시작 후에도 로그인 상태 유지 (자동 로그인)
 - 로그아웃
 
@@ -17,12 +18,15 @@
 - 회원가입 (이메일, 비밀번호, 닉네임)
 - 이메일 인증 대기 안내 및 인증 완료 처리
 - 로그인
+- Google 소셜 로그인 (OAuth 2.0, 회원가입 겸용)
+- Apple 소셜 로그인 (Sign in with Apple, 회원가입 겸용)
+- 소셜 로그인 시 닉네임은 provider의 display name을 자동 사용
+- 동일 이메일의 기존 계정이 있으면 자동 연동 (Supabase Auth 자동 링킹)
 - 로그아웃
 - 로그인 상태에 따른 화면 분기 (인증 전 → 로그인/회원가입 화면, 인증 후 → 메인 화면)
 - 사용자 프로필 정보 저장 (닉네임) — 이메일 인증 완료 후 저장
 
 ### 제외
-- 소셜 로그인 (추후 추가)
 - 비밀번호 찾기 / 재설정 (추후 추가)
 - 회원 탈퇴 (추후 추가)
 
@@ -55,6 +59,18 @@
    - 실패 (이메일 없음 / 비밀번호 불일치) → 에러 메시지 표시
    - 이메일 미인증 상태 → "이메일 인증이 필요합니다. 이메일을 확인해주세요." 표시
 
+### 소셜 로그인 (Google / Apple)
+1. 로그인 화면에서 "Google로 로그인" 또는 "Apple로 로그인" 버튼 탭
+2. 시스템 브라우저에서 OAuth 인증 화면 표시
+3. 사용자가 계정 선택 및 권한 승인
+4. 인증 완료 → 앱으로 딥링크 복귀
+5. 첫 로그인인 경우:
+   - provider의 display name으로 닉네임 자동 설정
+   - `profiles` 테이블에 프로필 생성
+   - 메인 화면으로 이동
+6. 재로그인인 경우: 바로 메인 화면 이동
+7. 동일 이메일의 기존 계정이 있는 경우: 자동 연동 후 메인 화면 이동
+
 ### 로그아웃
 1. 설정 화면에서 로그아웃 버튼 탭
 2. 확인 다이얼로그 표시
@@ -69,12 +85,18 @@
   - 비밀번호 입력 필드 (마스킹)
   - 로그인 버튼
   - 에러 메시지 영역
+  - 구분선 ("또는")
+  - "Google로 로그인" 버튼
+  - "Apple로 로그인" 버튼
 - **회원가입 탭**
   - 이메일 입력 필드
   - 비밀번호 입력 필드 (마스킹)
   - 닉네임 입력 필드
   - 회원가입 버튼
   - 에러 메시지 영역
+  - 구분선 ("또는")
+  - "Google로 로그인" 버튼 (회원가입 겸용)
+  - "Apple로 로그인" 버튼 (회원가입 겸용)
 - 로딩 중 버튼 비활성화 및 인디케이터 표시
 
 ### 이메일 인증 대기 화면 (`EmailVerificationScreen`)
@@ -103,6 +125,34 @@
 - `app.json`에 scheme 설정 필요 (예: `investdashboard://`)
 - Supabase 대시보드 → Authentication → URL Configuration에 Redirect URL 등록 필요
 
+## 소셜 로그인 기술 처리
+
+### Google 로그인
+- Supabase Auth의 `signInWithOAuth({ provider: 'google' })` 사용
+- `expo-web-browser`로 시스템 브라우저에서 OAuth 플로우 실행
+- 사전 설정:
+  - GCP Console에서 OAuth 2.0 클라이언트 ID 생성 (iOS, Web)
+  - Supabase 대시보드 → Authentication → Providers → Google 활성화 및 클라이언트 ID/Secret 등록
+
+### Apple 로그인
+- Supabase Auth의 `signInWithOAuth({ provider: 'apple' })` 사용
+- `expo-apple-authentication`으로 네이티브 Apple 로그인 UI 사용 (iOS)
+- 사전 설정:
+  - Apple Developer Console에서 Sign in with Apple 활성화
+  - Supabase 대시보드 → Authentication → Providers → Apple 활성화 및 Service ID/Secret 등록
+  - `app.json`에 `expo-apple-authentication` 플러그인 추가
+
+### 소셜 로그인 프로필 처리
+- 첫 소셜 로그인 시 `onAuthStateChange` → `SIGNED_IN` 이벤트 감지
+- `profiles` 테이블에 해당 user_id 레코드가 없으면 자동 생성
+- 닉네임: `session.user.user_metadata.full_name` 또는 `name` 필드 사용
+- display name이 없을 경우 이메일의 @ 앞부분을 닉네임으로 사용
+
+### 계정 연동
+- Supabase Auth 설정에서 "자동 유저 링킹" 활성화 필요
+- 동일 이메일로 이메일 가입 + 소셜 로그인 시 하나의 계정으로 자동 병합
+- `auth.identities` 테이블에서 연동된 provider 목록 관리
+
 ## 유효성 검사
 
 | 필드 | 규칙 | 에러 메시지 |
@@ -118,13 +168,15 @@
 
 Supabase Auth가 인증을 담당하므로 `auth.users` 테이블은 Supabase가 관리한다.
 앱에서 필요한 추가 프로필 정보(닉네임 등)는 별도 `profiles` 테이블에 저장한다.
+소셜 로그인도 동일한 `auth.users`에 통합 관리되며, `profiles` 테이블 구조는 변경 없음.
 
 | 항목 | 내용 |
 |------|------|
 | 인증 주체 | Supabase Auth (`auth.users`) |
 | 추가 프로필 | `public.profiles` 테이블 (user_id FK → auth.users) |
-| 프로필 저장 시점 | 이메일 인증 완료 후 (`SIGNED_IN` 이벤트) |
+| 프로필 저장 시점 | 이메일: 인증 완료 후 / 소셜: 첫 로그인 시 (`SIGNED_IN` 이벤트) |
 | 세션 관리 | Supabase Auth 세션 (자동 갱신) |
+| 계정 연동 | 동일 이메일 시 Supabase 자동 링킹 (`auth.identities`) |
 
 ## 비기능 요구사항
 
