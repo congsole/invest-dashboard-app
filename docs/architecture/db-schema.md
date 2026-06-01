@@ -1,11 +1,11 @@
 # DB Schema
 
-*최종 업데이트: 00b3fb9 — 2026-04-27*
+*최종 업데이트: 7ab2e6f — 2026-06-01*
 
 ## 테이블
 
 ### profiles
-사용자 추가 프로필 정보. Supabase Auth `auth.users`와 1:1 관계.
+사용자 추가 프로필 정보. Supabase Auth `auth.users`와 1:1 관계. 이메일 가입 시 이메일 인증 완료(`SIGNED_IN` 이벤트) 후 생성, 소셜 로그인(Google / Apple) 시 첫 로그인(`SIGNED_IN` 이벤트) 시 자동 생성. 소셜 로그인의 닉네임은 provider `full_name` / `name` 메타데이터를 사용하며, 없으면 이메일 @ 앞부분으로 대체. 인증 방식에 무관하게 테이블 구조는 동일.
 
 | 컬럼 | 타입 | 기본값 | 제약 | 설명 |
 |------|------|--------|------|------|
@@ -157,10 +157,28 @@
 
 ---
 
+### auth.identities (참조 전용 — Supabase 자동 관리)
+Supabase Auth가 자동 관리하는 인증 제공자 연동 정보. 앱에서 직접 DDL을 작성하거나 수정하지 않는다. 동일 User에 email / google / apple 등 여러 provider가 연결될 수 있으며, 동일 이메일이면 Supabase 자동 링킹으로 하나의 `auth.users` 레코드에 병합된다.
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid | 기본 키 (Supabase 생성) |
+| user_id | uuid | FK → auth.users(id) |
+| provider | text | 인증 제공자 식별자 (email / google / apple) |
+| identity_data | jsonb | provider별 사용자 정보 (email, name, sub 등) |
+| created_at | timestamptz | 연동 시각 |
+
+**관리 주체**
+- Supabase Auth 전용. 앱 마이그레이션 파일에 DDL 작성 불필요.
+- 읽기 접근: `auth.uid()`를 통해 자신의 identity만 조회 가능 (Supabase 기본 정책).
+
+---
+
 ## ERD (텍스트)
 
 ```
 auth.users ||--|| profiles : "1:1 (user_id FK)"
+auth.users ||--o{ auth.identities : "1:N (user_id FK) — Supabase 관리"
 auth.users ||--o{ account_events : "1:N (user_id FK)"
 auth.users ||--o{ daily_snapshots : "1:N (user_id FK)"
 account_events }o--o| prices : "N:1 (ticker + asset_type + event_date → prices)"
@@ -175,3 +193,4 @@ corporate_actions }o--o| prices : "N:1 (ticker + asset_type + effective_date →
 | [002] 이메일 인증 플로우 | DB 스키마 변경 없음. 재발송 쿨다운은 클라이언트 state로 관리. |
 | [003] 메인 대시보드 | trade_events, cash_balances 테이블 추가. ERD 관계 2개 추가. |
 | [004] 대시보드 기획 수정 (00b3fb9) | trade_events → account_events로 대체 (5종 이벤트 통합, nullable 필드, fx_rate_at_event/source/external_ref 추가). cash_balances 제거 (account_events 누적 계산으로 대체). daily_snapshots 테이블 추가. corporate_actions 테이블 추가. prices 테이블 추가. fx_rates 테이블 추가. ERD 관계 업데이트. |
+| [005] 소셜 로그인 추가 (7ab2e6f) | auth.identities 참조 섹션 추가 (Supabase 자동 관리, DDL 불필요). profiles 테이블 설명 보강 (소셜 로그인 시 생성 조건 및 닉네임 자동 설정 로직). ERD에 auth.users → auth.identities 관계 추가. |

@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 00b3fb9 — 2026-04-27*
+*최종 업데이트: 7ab2e6f — 2026-06-01*
 
 ## 공통
 
@@ -46,17 +46,17 @@
 
 ### 프로필 생성 (Create Profile)
 
-이메일 인증 완료 후(`SIGNED_IN` 이벤트 수신 시) 호출하여 닉네임을 저장한다.
+이메일 인증 완료 후(`SIGNED_IN` 이벤트 수신 시) 또는 소셜 로그인 첫 로그인 시(`SIGNED_IN` 이벤트 수신 후 profiles 레코드 없음 확인 시) 호출하여 닉네임을 저장한다. 소셜 로그인의 경우 닉네임은 `session.user.user_metadata.full_name` 또는 `name` 필드에서 자동 추출하며, 없으면 이메일 @ 앞부분을 사용한다.
 
 - **방식**: REST (auto-generated)
 - **호출**: `supabase.from('profiles').insert({ user_id, nickname })`
-- **인증**: 필요 (이메일 인증 완료 후 세션 사용)
+- **인증**: 필요 (세션 보유 상태)
 
 **요청 파라미터**
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
 | user_id | string | Y | 가입한 사용자 UUID |
-| nickname | string | Y | 닉네임 (2~20자) |
+| nickname | string | Y | 닉네임 (2~20자). 소셜 로그인 시 provider display name에서 자동 도출. |
 
 **응답**
 ```typescript
@@ -110,6 +110,73 @@
 |------|------|
 | 400 | 이메일 형식 오류 |
 | 401 | 이메일 없음 또는 비밀번호 불일치 |
+
+---
+
+### Google 소셜 로그인 (Sign In with Google)
+
+Google OAuth 2.0 플로우를 시스템 브라우저에서 실행한다. 인증 완료 후 딥링크로 앱으로 복귀하면 `onAuthStateChange` → `SIGNED_IN` 이벤트가 발생한다. 신규 사용자면 프로필 생성(Create Profile)을 이어서 호출한다. 동일 이메일의 기존 계정이 있으면 Supabase가 자동 링킹하여 하나의 계정으로 병합한다.
+
+- **방식**: Supabase Auth SDK
+- **호출**: `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })`
+- **인증**: 불필요
+- **사전 의존성**: `expo-web-browser` 설치. GCP Console OAuth 2.0 클라이언트 ID (iOS, Web) 생성. Supabase 대시보드 → Authentication → Providers → Google 활성화 및 Client ID / Secret 등록.
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| provider | `'google'` | Y | 고정값 |
+| options.redirectTo | string | Y | 인증 완료 후 딥링크 URL (예: `investdashboard://auth/callback`). Supabase 대시보드 Redirect URL 목록에 등록 필요. |
+
+**응답**
+```typescript
+{
+  provider: 'google'
+  url: string   // 시스템 브라우저에서 열릴 Google OAuth URL
+}
+```
+
+> 실제 세션은 딥링크 복귀 후 `onAuthStateChange` 이벤트를 통해 수신한다.
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | provider 설정 오류 또는 미지원 provider |
+| 네트워크 오류 | 오프라인 상태 |
+
+---
+
+### Apple 소셜 로그인 (Sign In with Apple)
+
+Sign in with Apple 플로우를 네이티브 UI(`expo-apple-authentication`)로 실행한다. 인증 완료 후 `onAuthStateChange` → `SIGNED_IN` 이벤트가 발생한다. 신규 사용자면 프로필 생성(Create Profile)을 이어서 호출한다. iOS 전용.
+
+- **방식**: Supabase Auth SDK
+- **호출**: `supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo } })`
+- **인증**: 불필요
+- **사전 의존성**: `expo-apple-authentication` 설치 및 `app.json` 플러그인 등록. Apple Developer Console에서 Sign in with Apple 활성화. Supabase 대시보드 → Authentication → Providers → Apple 활성화 및 Service ID / Secret 등록.
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| provider | `'apple'` | Y | 고정값 |
+| options.redirectTo | string | Y | 인증 완료 후 딥링크 URL (예: `investdashboard://auth/callback`). Supabase 대시보드 Redirect URL 목록에 등록 필요. |
+
+**응답**
+```typescript
+{
+  provider: 'apple'
+  url: string   // 네이티브 Apple 로그인 UI 또는 시스템 브라우저에서 열릴 URL
+}
+```
+
+> 실제 세션은 딥링크 복귀 후 `onAuthStateChange` 이벤트를 통해 수신한다.
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | provider 설정 오류 또는 미지원 provider |
+| 사용자 취소 | 사용자가 Apple 로그인 다이얼로그를 닫은 경우 |
+| 네트워크 오류 | 오프라인 상태 |
 
 ---
 
@@ -187,7 +254,7 @@
 
 ### 세션 상태 변경 구독 (Auth State Change)
 
-인증 상태 변화(로그인, 로그아웃, 세션 만료)를 실시간으로 감지한다.
+인증 상태 변화(로그인, 로그아웃, 세션 만료)를 실시간으로 감지한다. 소셜 로그인(Google / Apple) 완료 후 딥링크 복귀 시에도 `SIGNED_IN` 이벤트가 발생한다. 콜백 내에서 `profiles` 레코드 존재 여부를 확인하여 신규 사용자면 Create Profile을 자동 호출한다.
 
 - **방식**: Supabase Auth SDK (이벤트 구독)
 - **호출**: `supabase.auth.onAuthStateChange(callback)`
@@ -196,9 +263,32 @@
 **이벤트 타입**
 | 이벤트 | 상황 |
 |--------|------|
-| SIGNED_IN | 로그인 또는 세션 복원 성공 |
+| SIGNED_IN | 이메일 인증 완료, 이메일 로그인 성공, 소셜 로그인 완료(Google/Apple), 세션 복원 성공 |
 | SIGNED_OUT | 로그아웃 또는 세션 만료 |
 | TOKEN_REFRESHED | 토큰 자동 갱신 |
+
+**소셜 로그인 후 프로필 자동 생성 패턴**
+```typescript
+supabase.auth.onAuthStateChange(async (event, session) => {
+  if (event === 'SIGNED_IN' && session) {
+    // profiles 레코드 존재 여부 확인
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      // 신규 사용자: 소셜 provider display name 또는 이메일 앞부분으로 닉네임 결정
+      const nickname =
+        session.user.user_metadata?.full_name ??
+        session.user.user_metadata?.name ??
+        session.user.email?.split('@')[0] ??
+        '사용자'
+      await supabase.from('profiles').insert({ user_id: session.user.id, nickname })
+    }
+  }
+})
 
 ---
 
@@ -863,3 +953,4 @@ ExchangeRate-API를 호출하여 USD/KRW 환율을 반환한다. 1시간 캐시.
 | [003] 메인 대시보드 | TradeEvent 도메인 추가 (목록 조회, 등록, 수정, 삭제, CSV 업로드 미리보기, CSV 확정 저장). CashBalance 도메인 추가 (목록 조회, 스냅샷 등록). Dashboard 집계 도메인 추가 (포트폴리오 요약, 자산 히스토리, 부문별 비중). Market 도메인 추가 (현재가 조회, 환율 조회). |
 | [핫픽스] Market Edge Function 인증 | Supabase 프로젝트가 ES256 JWT를 사용하나 플랫폼 레벨 검증이 미지원. `--no-verify-jwt`로 게이트웨이 검증 비활성화 후 `jose` 라이브러리로 함수 내부에서 ES256 직접 검증하도록 변경. |
 | [004] 대시보드 기획 수정 (00b3fb9) | TradeEvent 도메인 → AccountEvent 도메인으로 전면 대체 (5종 이벤트 통합, 타입별 필수/선택 필드 규칙 정의, CSV 함수명 변경 및 external_ref 기반 중복 방지 로직 반영). CashBalance 도메인 제거 (account_events 누적 계산으로 대체). Dashboard — 포트폴리오 요약 → KPI 데이터 조회로 확장 (총 평가액/원금/순수익/수익률/예수금(통화별)/누적 배당·수수료·세금 + holdings 집계 포함). 자산 히스토리 → daily_snapshots 기반으로 변경 (3개 라인 + 이벤트 마커 분리 조회, "전체" 기간 추가). 부문별 비중 파이 차트 API 제거. DailySnapshot 도메인 신규 추가 (스냅샷 조회). CorporateAction 도메인 신규 추가 (목록 조회, 관리자 등록). Market — 일별 종가 수집 cron, 일별 스냅샷 생성 cron, 환율 수집 cron 신규 추가. |
+| [005] 소셜 로그인 추가 (7ab2e6f) | Auth — Google 소셜 로그인(signInWithOAuth google) 신규 추가. Apple 소셜 로그인(signInWithOAuth apple) 신규 추가. createProfile 설명 보강 (소셜 로그인 첫 로그인 시 호출 조건, provider display name 자동 추출 로직). onAuthStateChange 이벤트 표 수정 (SIGNED_IN 항목에 소셜 로그인 완료 케이스 추가) 및 소셜 로그인 후 프로필 자동 생성 패턴 코드 예시 추가. |
