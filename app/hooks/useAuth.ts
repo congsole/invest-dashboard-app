@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../utils/supabase';
-import { createProfile } from '../services/auth';
+import { createProfile, extractSocialNickname, getProfile } from '../services/auth';
 import { AuthUser } from '../types/auth';
 
 interface UseAuthResult {
@@ -53,25 +53,50 @@ export function useAuth(): UseAuthResult {
           email: session.user.email ?? '',
         };
 
-        // 이메일 인증 완료(SIGNED_IN) + 닉네임 보관 중이면 프로필 생성
-        if (event === 'SIGNED_IN' && pendingNicknameRef.current) {
-          const nickname = pendingNicknameRef.current;
-          pendingNicknameRef.current = null;
+        if (event === 'SIGNED_IN') {
+          // 이메일 인증 완료 + 닉네임 보관 중이면 프로필 생성 (이메일 가입 플로우)
+          if (pendingNicknameRef.current) {
+            const nickname = pendingNicknameRef.current;
+            pendingNicknameRef.current = null;
 
-          // setLoading(true)로 AuthScreen 깜빡임 방지 후 프로필 생성 완료 시 user 설정
-          setLoading(true);
-          createProfile({ userId: authUser.id, nickname })
-            .then(() => {
-              setUser(authUser);
-            })
-            .catch((profileError) => {
-              console.error('프로필 생성 오류:', profileError);
-              // 프로필 생성 실패 시에도 로그인은 유지 (재시도 가능)
-              setUser(authUser);
-            })
-            .finally(() => {
-              setLoading(false);
-            });
+            setLoading(true);
+            createProfile({ userId: authUser.id, nickname })
+              .then(() => {
+                setUser(authUser);
+              })
+              .catch((profileError) => {
+                console.error('프로필 생성 오류:', profileError);
+                setUser(authUser);
+              })
+              .finally(() => {
+                setLoading(false);
+              });
+          } else {
+            // 소셜 로그인 또는 기존 사용자 로그인: 프로필 존재 여부 확인
+            setLoading(true);
+            getProfile(authUser.id)
+              .then((profile) => {
+                if (!profile) {
+                  // 소셜 로그인 신규 사용자: provider display name으로 닉네임 자동 생성
+                  const nickname = extractSocialNickname(
+                    session.user.user_metadata,
+                    session.user.email,
+                  );
+                  return createProfile({ userId: authUser.id, nickname });
+                }
+                return profile;
+              })
+              .then(() => {
+                setUser(authUser);
+              })
+              .catch((profileError) => {
+                console.error('소셜 로그인 프로필 처리 오류:', profileError);
+                setUser(authUser);
+              })
+              .finally(() => {
+                setLoading(false);
+              });
+          }
         } else {
           setUser(authUser);
           setLoading(false);

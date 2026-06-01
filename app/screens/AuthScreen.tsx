@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { signIn, signUp } from '../services/auth';
+import { signIn, signUp, signInWithOAuth, OAuthProvider } from '../services/auth';
 
 type Tab = 'login' | 'signup';
 
@@ -48,6 +48,20 @@ function validateNickname(nickname: string): string | null {
 // ────────────────────────────────────────────
 // 에러 메시지 파싱
 // ────────────────────────────────────────────
+
+function parseSocialAuthError(error: unknown): string {
+  if (error instanceof Error) {
+    const msg = error.message;
+    if (msg.includes('network') || msg.includes('fetch')) {
+      return '네트워크 오류가 발생했습니다. 다시 시도해주세요';
+    }
+    if (msg.includes('provider') || msg.includes('설정')) {
+      return '소셜 로그인 설정에 문제가 있습니다. 잠시 후 다시 시도해주세요';
+    }
+    return '소셜 로그인에 실패했습니다. 다시 시도해주세요';
+  }
+  return '알 수 없는 오류가 발생했습니다';
+}
 
 function parseAuthError(error: unknown): string {
   if (error instanceof Error) {
@@ -89,6 +103,10 @@ export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
   const [signupError, setSignupError] = useState('');
   const [signupLoading, setSignupLoading] = useState(false);
 
+  // 소셜 로그인 상태
+  const [socialLoading, setSocialLoading] = useState<OAuthProvider | null>(null);
+  const [socialError, setSocialError] = useState('');
+
   // ─── 로그인 핸들러 ───
   const handleLogin = async () => {
     setLoginError('');
@@ -109,6 +127,24 @@ export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
       setLoginLoading(false);
     }
   };
+
+  // ─── 소셜 로그인 핸들러 ───
+  const handleSocialLogin = useCallback(async (provider: OAuthProvider) => {
+    setSocialError('');
+    setSocialLoading(provider);
+    try {
+      await signInWithOAuth(provider);
+      // 성공 시 useAuth 훅이 onAuthStateChange → SIGNED_IN으로 처리
+    } catch (error) {
+      if (error instanceof Error && error.message === 'USER_CANCELLED') {
+        // 사용자가 취소한 경우 에러 표시하지 않음
+        return;
+      }
+      setSocialError(parseSocialAuthError(error));
+    } finally {
+      setSocialLoading(null);
+    }
+  }, []);
 
   // ─── 회원가입 핸들러 ───
   const handleSignup = async () => {
@@ -155,7 +191,7 @@ export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
           <View style={styles.tabRow}>
             <TouchableOpacity
               style={[styles.tab, tab === 'login' && styles.tabActive]}
-              onPress={() => setTab('login')}
+              onPress={() => { setTab('login'); setSocialError(''); }}
             >
               <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>
                 로그인
@@ -163,7 +199,7 @@ export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.tab, tab === 'signup' && styles.tabActive]}
-              onPress={() => setTab('signup')}
+              onPress={() => { setTab('signup'); setSocialError(''); }}
             >
               <Text style={[styles.tabText, tab === 'signup' && styles.tabTextActive]}>
                 회원가입
@@ -198,9 +234,9 @@ export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
                 <Text style={styles.errorText}>{loginError}</Text>
               ) : null}
               <TouchableOpacity
-                style={[styles.button, loginLoading && styles.buttonDisabled]}
+                style={[styles.button, (loginLoading || socialLoading !== null) && styles.buttonDisabled]}
                 onPress={handleLogin}
-                disabled={loginLoading}
+                disabled={loginLoading || socialLoading !== null}
               >
                 {loginLoading ? (
                   <ActivityIndicator color="#fff" />
@@ -208,6 +244,40 @@ export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
                   <Text style={styles.buttonText}>로그인</Text>
                 )}
               </TouchableOpacity>
+
+              {/* 구분선 */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>또는</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* 소셜 로그인 버튼 */}
+              <TouchableOpacity
+                style={[styles.socialButton, styles.googleButton, socialLoading !== null && styles.socialButtonDisabled]}
+                onPress={() => handleSocialLogin('google')}
+                disabled={loginLoading || socialLoading !== null}
+              >
+                {socialLoading === 'google' ? (
+                  <ActivityIndicator color="#111" />
+                ) : (
+                  <Text style={styles.socialButtonText}>Google로 로그인</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.socialButton, styles.appleButton, socialLoading !== null && styles.socialButtonDisabled]}
+                onPress={() => handleSocialLogin('apple')}
+                disabled={loginLoading || socialLoading !== null}
+              >
+                {socialLoading === 'apple' ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.appleButtonText}>Apple로 로그인</Text>
+                )}
+              </TouchableOpacity>
+              {socialError ? (
+                <Text style={styles.errorText}>{socialError}</Text>
+              ) : null}
             </View>
           )}
 
@@ -248,9 +318,9 @@ export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
                 <Text style={styles.errorText}>{signupError}</Text>
               ) : null}
               <TouchableOpacity
-                style={[styles.button, signupLoading && styles.buttonDisabled]}
+                style={[styles.button, (signupLoading || socialLoading !== null) && styles.buttonDisabled]}
                 onPress={handleSignup}
-                disabled={signupLoading}
+                disabled={signupLoading || socialLoading !== null}
               >
                 {signupLoading ? (
                   <ActivityIndicator color="#fff" />
@@ -258,6 +328,40 @@ export function AuthScreen({ onSignupPendingVerification }: AuthScreenProps) {
                   <Text style={styles.buttonText}>회원가입</Text>
                 )}
               </TouchableOpacity>
+
+              {/* 구분선 */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>또는</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* 소셜 로그인 버튼 (회원가입 겸용) */}
+              <TouchableOpacity
+                style={[styles.socialButton, styles.googleButton, socialLoading !== null && styles.socialButtonDisabled]}
+                onPress={() => handleSocialLogin('google')}
+                disabled={signupLoading || socialLoading !== null}
+              >
+                {socialLoading === 'google' ? (
+                  <ActivityIndicator color="#111" />
+                ) : (
+                  <Text style={styles.socialButtonText}>Google로 로그인</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.socialButton, styles.appleButton, socialLoading !== null && styles.socialButtonDisabled]}
+                onPress={() => handleSocialLogin('apple')}
+                disabled={signupLoading || socialLoading !== null}
+              >
+                {socialLoading === 'apple' ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.appleButtonText}>Apple로 로그인</Text>
+                )}
+              </TouchableOpacity>
+              {socialError ? (
+                <Text style={styles.errorText}>{socialError}</Text>
+              ) : null}
             </View>
           )}
         </View>
@@ -341,6 +445,48 @@ const styles = StyleSheet.create({
     backgroundColor: '#999',
   },
   buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e0e0e0',
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 13,
+    color: '#999',
+  },
+  socialButton: {
+    borderRadius: 8,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  socialButtonDisabled: {
+    opacity: 0.5,
+  },
+  googleButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  socialButtonText: {
+    color: '#111',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  appleButton: {
+    backgroundColor: '#000',
+  },
+  appleButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
