@@ -1,0 +1,7 @@
+
+[10:24:03] ── 파이프라인 시작 (7b4d051)
+[10:24:03] [설계] domain-model-agent 시작
+[10:25:46] [설계] domain-model-agent ✅
+[10:25:46] [설계] db-schema-agent 시작
+[10:27:49] [설계] db-schema-agent ✅
+[10:27:49] [설계] api-spec-agent 시작

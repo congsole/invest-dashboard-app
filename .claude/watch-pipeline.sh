@@ -2,10 +2,11 @@
 # 파이프라인 진행 상황을 실시간으로 보여주는 스크립트
 # 사용법: bash .claude/watch-pipeline.sh
 
-LOG="$(git rev-parse --show-toplevel)/.claude/pipeline.log"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG="$SCRIPT_DIR/pipeline-status.log"
 
 if [ ! -f "$LOG" ]; then
-  echo "pipeline.log가 없습니다."
+  echo "pipeline-status.log가 없습니다."
   exit 1
 fi
 
