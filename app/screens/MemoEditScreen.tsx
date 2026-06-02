@@ -7,6 +7,11 @@
  * - 생성 모드: memoId === undefined
  * - 편집 모드: memoId가 전달됨 → 상세 조회 후 초기값 설정
  * - 수정/삭제 기능 포함
+ *
+ * [013] StockSearchModal 컴포넌트로 교체:
+ * - 로컬 → 외부 자동전환 검색
+ * - "추가" 칩으로 외부 검색 결과 구분
+ * - sector_id null 시 섹터 선택 드롭다운 자동 노출
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -20,14 +25,13 @@ import {
   SafeAreaView,
   ActivityIndicator,
   Alert,
-  Modal,
-  FlatList,
 } from 'react-native';
 import { useMemoDetail } from '../hooks/useMemoDetail';
 import { useMemoMutation } from '../hooks/useMemoMutation';
-import { getSectors, searchStocks } from '../services/memo';
-import { Sector, Stock, MemoStockInput, ENTITY_COLORS } from '../types/memo';
+import { getSectors } from '../services/memo';
+import { Sector, MemoStockInput, ENTITY_COLORS } from '../types/memo';
 import { EntityChip } from '../components/EntityChip';
+import { StockSearchModal, SelectedStockInfo } from '../components/StockSearchModal';
 
 // ────────────────────────────────────────────
 // 연결 종목 상태 (goal_price 포함)
@@ -37,7 +41,8 @@ interface SelectedStock {
   stock_id: string;
   ticker: string;
   name: string;
-  asset_type: 'korean_stock' | 'us_stock' | 'crypto';
+  market: 'KR' | 'US' | 'CRYPTO';
+  sector_id: number | null;
   goal_price: string; // 입력 문자열
 }
 
@@ -51,134 +56,6 @@ interface MemoEditScreenProps {
   onDeleted?: () => void;
   onBack: () => void;
 }
-
-// ────────────────────────────────────────────
-// 종목 검색 모달 (내부)
-// ────────────────────────────────────────────
-
-interface StockSearchModalProps {
-  visible: boolean;
-  excludeIds: string[];
-  onClose: () => void;
-  onSelect: (stock: Stock) => void;
-}
-
-function StockSearchModal({ visible, excludeIds, onClose, onSelect }: StockSearchModalProps) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Stock[]>([]);
-  const [searching, setSearching] = useState(false);
-
-  useEffect(() => {
-    if (!visible) {
-      setQuery('');
-      setResults([]);
-    }
-  }, [visible]);
-
-  useEffect(() => {
-    if (query.trim().length < 1) {
-      setResults([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const data = await searchStocks(query.trim());
-        setResults(data.filter((s) => !excludeIds.includes(s.id)));
-      } catch {
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query, excludeIds]);
-
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
-      <SafeAreaView style={modalStyles.container}>
-        <View style={modalStyles.header}>
-          <Text style={modalStyles.title}>종목 추가</Text>
-          <TouchableOpacity onPress={onClose}>
-            <Text style={modalStyles.closeText}>닫기</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={modalStyles.searchRow}>
-          <TextInput
-            style={modalStyles.input}
-            placeholder="종목명 또는 티커 검색"
-            placeholderTextColor="#737688"
-            value={query}
-            onChangeText={setQuery}
-            autoFocus
-            autoCorrect={false}
-          />
-        </View>
-        {searching && <ActivityIndicator style={{ marginTop: 20 }} color="#003ec7" />}
-        <FlatList
-          data={results}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={modalStyles.resultItem}
-              onPress={() => {
-                onSelect(item);
-                onClose();
-              }}
-            >
-              <Text style={modalStyles.ticker}>{item.ticker}</Text>
-              <Text style={modalStyles.name}>{item.name}</Text>
-            </TouchableOpacity>
-          )}
-          ListEmptyComponent={
-            query.length > 0 && !searching ? (
-              <Text style={modalStyles.emptyText}>검색 결과가 없습니다</Text>
-            ) : null
-          }
-        />
-      </SafeAreaView>
-    </Modal>
-  );
-}
-
-const modalStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9ff' },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  title: { fontSize: 18, fontWeight: '700', color: '#0b1c30' },
-  closeText: { fontSize: 14, color: '#003ec7', fontWeight: '600' },
-  searchRow: { paddingHorizontal: 20, marginBottom: 8 },
-  input: {
-    backgroundColor: '#dce9ff',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: '#0b1c30',
-  },
-  resultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5eeff',
-    gap: 12,
-  },
-  ticker: { fontSize: 13, fontWeight: '700', color: '#003ec7', width: 60 },
-  name: { fontSize: 14, color: '#0b1c30', flex: 1 },
-  emptyText: { textAlign: 'center', marginTop: 40, color: '#737688', fontSize: 14 },
-});
 
 // ────────────────────────────────────────────
 // MemoEditScreen
@@ -205,7 +82,7 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
     if (isEdit && memoId) {
       fetchDetail(memoId);
     }
-  }, [isEdit, memoId]);
+  }, [isEdit, memoId, fetchDetail]);
 
   // 기존 데이터로 폼 초기화
   useEffect(() => {
@@ -216,25 +93,31 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
         stock_id: ms.stock_id,
         ticker: ms.stocks.ticker,
         name: ms.stocks.name,
-        asset_type: ms.stocks.asset_type,
+        market: ms.stocks.market,
+        sector_id: null,
         goal_price: ms.goal_price !== null ? String(ms.goal_price) : '',
       })),
     );
     setSelectedSectorIds(existingMemo.memo_sectors.map((ms) => ms.sector_id));
   }, [existingMemo]);
 
-  // ── 종목 추가 ──
-  const handleStockSelect = useCallback((stock: Stock) => {
-    setSelectedStocks((prev) => [
-      ...prev,
-      {
-        stock_id: stock.id,
-        ticker: stock.ticker,
-        name: stock.name,
-        asset_type: stock.asset_type,
-        goal_price: '',
-      },
-    ]);
+  // ── 종목 선택 (StockSearchModal 콜백) ──
+  const handleStockSelect = useCallback((stockInfo: SelectedStockInfo) => {
+    setSelectedStocks((prev) => {
+      // 이미 선택된 종목이면 무시
+      if (prev.some((s) => s.stock_id === stockInfo.id)) return prev;
+      return [
+        ...prev,
+        {
+          stock_id: stockInfo.id,
+          ticker: stockInfo.ticker,
+          name: stockInfo.name,
+          market: stockInfo.market,
+          sector_id: stockInfo.sector_id,
+          goal_price: '',
+        },
+      ];
+    });
   }, []);
 
   const handleRemoveStock = useCallback((stockId: string) => {
@@ -446,7 +329,7 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
         </TouchableOpacity>
       </ScrollView>
 
-      {/* 종목 검색 모달 */}
+      {/* 종목 검색 모달 (이슈 013: 로컬→외부 자동전환 + 섹터 선택) */}
       <StockSearchModal
         visible={stockModalVisible}
         excludeIds={excludeIds}

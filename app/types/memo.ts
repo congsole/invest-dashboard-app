@@ -10,9 +10,11 @@ export interface Sector {
 export interface Stock {
   id: string;
   ticker: string;
-  asset_type: 'korean_stock' | 'us_stock' | 'crypto';
   name: string;
+  market: 'KR' | 'US' | 'CRYPTO';
+  currency: string;
   sector_id: number | null;
+  is_active: boolean;
   sectors: Sector | null;
   created_at: string;
 }
@@ -23,7 +25,7 @@ export interface MemoStock {
   stock_id: string;
   ticker: string;
   name: string;
-  asset_type: 'korean_stock' | 'us_stock' | 'crypto';
+  market: 'KR' | 'US' | 'CRYPTO';
   goal_price: number | null;
 }
 
@@ -73,7 +75,9 @@ export interface MemoDetail {
       id: string;
       ticker: string;
       name: string;
-      asset_type: 'korean_stock' | 'us_stock' | 'crypto';
+      market: 'KR' | 'US' | 'CRYPTO';
+      currency: string;
+      is_active: boolean;
     };
   }>;
   memo_trade_events: Array<{

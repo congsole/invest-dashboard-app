@@ -3,6 +3,7 @@
  *
  * API 명세 참조: docs/api/api-spec.md — Memo / Sector / Stock 섹션
  * 이슈 011: 메모 화면 UI
+ * [012] stocks 재설계 반영: asset_type → market, currency/is_active 추가
  */
 
 import { supabase } from '../utils/supabase';
@@ -37,13 +38,13 @@ export async function getSectors(): Promise<Sector[]> {
 
 export async function getStock(
   ticker: string,
-  assetType: 'korean_stock' | 'us_stock' | 'crypto',
+  market: 'KR' | 'US' | 'CRYPTO',
 ): Promise<Stock | null> {
   const { data, error } = await supabase
     .from('stocks')
     .select('*, sectors(id, code, name)')
     .eq('ticker', ticker)
-    .eq('asset_type', assetType)
+    .eq('market', market)
     .maybeSingle();
 
   if (error) throw error;
@@ -55,6 +56,7 @@ export async function searchStocks(query: string): Promise<Stock[]> {
     .from('stocks')
     .select('*, sectors(id, code, name)')
     .or(`ticker.ilike.%${query}%,name.ilike.%${query}%`)
+    .eq('is_active', true)
     .order('name', { ascending: true })
     .limit(20);
 
@@ -94,7 +96,7 @@ export async function getMemo(memoId: string): Promise<MemoDetail> {
   const { data, error } = await supabase
     .from('memos')
     .select(
-      '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, asset_type)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name))',
+      '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name))',
     )
     .eq('id', memoId)
     .single();
@@ -304,21 +306,25 @@ export async function unlinkMemoSector(memoId: string, sectorId: number): Promis
 }
 
 // ────────────────────────────────────────────
-// 종목 검색 (upsert_stock_with_sector RPC)
+// 종목 등록 또는 조회 + 섹터 자동 추천 (RPC)
+// [012] get_or_recommend_stock_sector RPC로 변경
 // ────────────────────────────────────────────
 
-export interface UpsertStockInput {
+export interface GetOrRecommendStockInput {
   p_ticker: string;
-  p_asset_type: 'korean_stock' | 'us_stock' | 'crypto';
+  p_market: 'KR' | 'US' | 'CRYPTO';
   p_name: string;
+  p_currency: string;
   p_naver_industry?: string | null;
 }
 
-export interface UpsertStockResult {
+export interface GetOrRecommendStockResult {
   id: string;
   ticker: string;
-  asset_type: 'korean_stock' | 'us_stock' | 'crypto';
   name: string;
+  market: 'KR' | 'US' | 'CRYPTO';
+  currency: string;
+  is_active: boolean;
   sector_id: number | null;
   recommended_sector: {
     id: number;
@@ -329,28 +335,17 @@ export interface UpsertStockResult {
   created_at: string;
 }
 
-export async function upsertStockWithSector(
-  input: UpsertStockInput,
-): Promise<UpsertStockResult> {
-  const { data, error } = await supabase.rpc('upsert_stock_with_sector', {
-    p_ticker: input.p_ticker,
-    p_asset_type: input.p_asset_type,
-    p_name: input.p_name,
+export async function getOrRecommendStockSector(
+  input: GetOrRecommendStockInput,
+): Promise<GetOrRecommendStockResult> {
+  const { data, error } = await supabase.rpc('get_or_recommend_stock_sector', {
+    p_ticker:         input.p_ticker,
+    p_market:         input.p_market,
+    p_name:           input.p_name,
+    p_currency:       input.p_currency,
     p_naver_industry: input.p_naver_industry ?? null,
   });
 
   if (error) throw error;
-  return data as UpsertStockResult;
-}
-
-export async function updateStockSector(
-  stockId: string,
-  sectorId: number | null,
-): Promise<void> {
-  const { error } = await supabase
-    .from('stocks')
-    .update({ sector_id: sectorId })
-    .eq('id', stockId);
-
-  if (error) throw error;
+  return data as GetOrRecommendStockResult;
 }
