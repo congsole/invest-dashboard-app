@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 7ab2e6f — 2026-06-01*
+*최종 업데이트: 7b4d051 — 2026-06-02*
 
 ## 공통
 
@@ -944,6 +944,580 @@ ExchangeRate-API를 호출하여 USD/KRW 환율을 반환한다. 1시간 캐시.
 
 ---
 
+## Sector (섹터)
+
+### 섹터 목록 조회
+
+GICS 11개 + 가상자산 12개 고정 시드를 조회한다. 메모 작성 시 섹터 연결 선택, 종목 섹터 수동 지정, 필터 UI 구성 등에 사용한다.
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('sectors').select('*').order('id', { ascending: true })`
+- **인증**: 필요
+
+**요청 파라미터**
+없음
+
+**응답**
+```typescript
+Array<{
+  id: number               // 1~12 고정
+  code: string             // 'IT' | 'HEALTHCARE' | 'FINANCIALS' | 'CONS_DISC' | 'CONS_STAPLES' | 'COMM' | 'INDUSTRIALS' | 'MATERIALS' | 'ENERGY' | 'UTILITIES' | 'REAL_ESTATE' | 'CRYPTO'
+  name: string             // '정보기술' | '헬스케어' | '금융' | '경기소비재' | '필수소비재' | '커뮤니케이션서비스' | '산업재' | '소재' | '에너지' | '유틸리티' | '부동산' | '가상자산'
+}>
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+
+---
+
+## Stock (종목 마스터)
+
+### 종목 조회 (단건)
+
+ticker + asset_type 조합으로 종목 단건을 조회한다.
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('stocks').select('*, sectors(id, code, name)').eq('ticker', ticker).eq('asset_type', assetType).maybeSingle()`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| ticker | string | Y | 종목 코드 또는 코인 티커 |
+| asset_type | `'korean_stock' \| 'us_stock' \| 'crypto'` | Y | 자산 유형 |
+
+**응답**
+```typescript
+{
+  id: string
+  ticker: string
+  asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+  name: string
+  sector_id: number | null
+  sectors: {
+    id: number
+    code: string
+    name: string
+  } | null
+  created_at: string
+} | null
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+
+---
+
+### 종목 등록 또는 조회 + 섹터 자동 추천 (RPC)
+
+종목을 `stocks` 테이블에 등록하고 섹터 자동 추천 결과를 함께 반환한다. 이미 등록된 종목이면 기존 레코드를 그대로 반환한다. 섹터 자동 추천 규칙: 미국 주식은 Yahoo Finance GICS 섹터 코드를 직접 매핑, 한국 주식은 `kr_sector_map`을 거쳐 GICS 변환, 암호화폐는 CRYPTO 고정.
+
+- **방식**: RPC (DB Function)
+- **호출**: `supabase.rpc('upsert_stock_with_sector', { p_ticker, p_asset_type, p_name, p_naver_industry })`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| p_ticker | string | Y | 종목 코드 또는 코인 티커 |
+| p_asset_type | `'korean_stock' \| 'us_stock' \| 'crypto'` | Y | 자산 유형 |
+| p_name | string | Y | 종목명 |
+| p_naver_industry | string \| null | N | 한국 주식의 네이버 업종명. korean_stock이고 null이면 섹터 추천 불가(null 반환). |
+
+**응답**
+```typescript
+{
+  id: string
+  ticker: string
+  asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+  name: string
+  sector_id: number | null        // 자동 추천된 sector_id. 없으면 null.
+  recommended_sector: {
+    id: number
+    code: string
+    name: string
+  } | null                        // 자동 추천 섹터 정보. 추천 불가 시 null.
+  is_new: boolean                 // true이면 신규 등록, false이면 기존 레코드 반환
+  created_at: string
+}
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | p_asset_type 값 오류 |
+| 401 | 인증 토큰 없음 또는 만료 |
+
+---
+
+### 종목 섹터 수동 지정/변경
+
+종목의 `sector_id`를 사용자가 직접 수정한다. 자동 추천 결과가 맞지 않을 때 보정에 사용한다.
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('stocks').update({ sector_id }).eq('id', stockId)`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| id | string (uuid) | Y | 종목 ID |
+| sector_id | number \| null | Y | 변경할 섹터 ID. null이면 섹터 해제(미분류). |
+
+**응답**
+```typescript
+{
+  id: string
+  ticker: string
+  asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+  name: string
+  sector_id: number | null
+  created_at: string
+}
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | sector_id가 sectors 테이블에 없는 값 |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 404 | 해당 ID 종목 없음 |
+
+---
+
+## Memo (메모/투자 일지)
+
+### 메모 생성 (본문 + 엔티티 연결 한 번에) (RPC)
+
+메모 본체와 엔티티 연결(종목, 매매이벤트, 뉴스, 섹터)을 단일 트랜잭션으로 생성한다. 종목 연결 시 `goal_price`를 함께 저장할 수 있다. 매수/매도 폼 통합 시에도 이 API를 사용한다.
+
+- **방식**: RPC (DB Function)
+- **호출**: `supabase.rpc('create_memo_with_links', { p_body, p_stocks, p_trade_event_ids, p_news_ids, p_sector_ids })`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| p_body | string | Y | 메모 본문 (1자 이상) |
+| p_stocks | `Array<{ stock_id: string; goal_price: number \| null }>` | N | 연결할 종목 목록. 빈 배열 또는 미전달 시 연결 없음. |
+| p_trade_event_ids | `string[]` | N | 연결할 매매이벤트 ID 목록 (buy/sell event_type만 허용). |
+| p_news_ids | `string[]` | N | 연결할 뉴스 ID 목록. |
+| p_sector_ids | `number[]` | N | 연결할 섹터 ID 목록. |
+
+**응답**
+```typescript
+{
+  id: string
+  user_id: string
+  body: string
+  created_at: string
+  updated_at: string
+  stocks: Array<{
+    stock_id: string
+    ticker: string
+    name: string
+    asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+    goal_price: number | null
+  }>
+  trade_events: Array<{
+    event_id: string
+    event_type: 'buy' | 'sell'
+    event_date: string
+    ticker: string | null
+    name: string | null
+  }>
+  news: Array<{
+    news_id: string
+  }>
+  sectors: Array<{
+    sector_id: number
+    code: string
+    name: string
+  }>
+}
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | p_body가 비어 있음. p_trade_event_ids에 buy/sell 이외 event_type 포함. goal_price <= 0. |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 404 | p_stocks의 stock_id, p_trade_event_ids의 event_id, p_news_ids의 news_id, p_sector_ids의 sector_id가 존재하지 않음 |
+
+---
+
+### 메모 목록 조회 (필터 지원) (RPC)
+
+최신순(`created_at desc`)으로 메모 목록을 조회한다. 달력형과 리스트형 모두 이 API를 사용하며, 달력형은 날짜 범위(`from`/`to`)를 지정하고 리스트형은 필터 조건을 조합한다. 필터 조건은 AND로 결합된다.
+
+종목 필터 시: 해당 종목에 직접 연결된 메모와, 해당 종목의 매매이벤트에 연결된 메모를 함께 반환한다(`include_trade_events: true` 기본값). `include_trade_events: false`이면 직접 연결된 메모만 반환한다.
+
+- **방식**: RPC (DB Function)
+- **호출**: `supabase.rpc('list_memos', { p_from, p_to, p_stock_id, p_include_trade_events, p_trade_events_only, p_news_only, p_sector_id, p_no_links, p_limit, p_offset })`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| p_from | string (date) \| null | N | 조회 시작일 (YYYY-MM-DD). 달력형에서 월 첫날. |
+| p_to | string (date) \| null | N | 조회 종료일 (YYYY-MM-DD). 달력형에서 월 마지막날. |
+| p_stock_id | string (uuid) \| null | N | 종목 필터. 해당 종목에 연결된 메모만 반환. |
+| p_include_trade_events | boolean | N | 종목 필터 시 해당 종목의 매매이벤트 연결 메모 포함 여부 (기본 true). p_stock_id가 null이면 무시. |
+| p_trade_events_only | boolean | N | true이면 매매이벤트 연결 메모만 반환 (기본 false). |
+| p_news_only | boolean | N | true이면 뉴스 연결 메모만 반환 (기본 false). |
+| p_sector_id | number \| null | N | 섹터 필터. 해당 섹터에 연결된 메모만 반환. |
+| p_no_links | boolean | N | true이면 어떤 엔티티에도 연결되지 않은 메모만 반환 (기본 false). |
+| p_limit | number | N | 페이지 크기 (기본 20, 최대 100). |
+| p_offset | number | N | 페이지 오프셋 (기본 0). |
+
+**응답**
+```typescript
+{
+  memos: Array<{
+    id: string
+    body: string
+    created_at: string
+    updated_at: string
+    stocks: Array<{
+      stock_id: string
+      ticker: string
+      name: string
+      asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+      goal_price: number | null
+    }>
+    trade_events: Array<{
+      event_id: string
+      event_type: 'buy' | 'sell'
+      event_date: string
+      ticker: string | null
+      name: string | null
+    }>
+    news: Array<{
+      news_id: string
+    }>
+    sectors: Array<{
+      sector_id: number
+      code: string
+      name: string
+    }>
+  }>
+  total_count: number
+}
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | p_limit > 100. p_from > p_to. |
+| 401 | 인증 토큰 없음 또는 만료 |
+
+---
+
+### 메모 상세 조회
+
+메모 단건을 엔티티 연결 정보 포함하여 조회한다.
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memos').select('*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, asset_type)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name))').eq('id', memoId).single()`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| id | string (uuid) | Y | 메모 ID |
+
+**응답**
+```typescript
+{
+  id: string
+  user_id: string
+  body: string
+  created_at: string
+  updated_at: string
+  memo_stocks: Array<{
+    stock_id: string
+    goal_price: number | null
+    stocks: {
+      id: string
+      ticker: string
+      name: string
+      asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+    }
+  }>
+  memo_trade_events: Array<{
+    event_id: string
+    account_events: {
+      id: string
+      event_type: 'buy' | 'sell'
+      event_date: string
+      ticker: string | null
+      name: string | null
+    }
+  }>
+  memo_news: Array<{
+    news_id: string
+  }>
+  memo_sectors: Array<{
+    sector_id: number
+    sectors: {
+      id: number
+      code: string
+      name: string
+    }
+  }>
+}
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+| 403 | RLS 위반 (다른 사용자 메모 조회 시도) |
+| 404 | 해당 ID 메모 없음 |
+
+---
+
+### 메모 수정 (본문 + 엔티티 연결 한 번에) (RPC)
+
+메모 본문과 엔티티 연결을 단일 트랜잭션으로 수정한다. 기존 연결을 전부 교체(replace)하는 방식이다. 수정할 필드만 전달하되, 엔티티 연결은 전달한 배열 전체로 덮어쓴다.
+
+- **방식**: RPC (DB Function)
+- **호출**: `supabase.rpc('update_memo_with_links', { p_memo_id, p_body, p_stocks, p_trade_event_ids, p_news_ids, p_sector_ids })`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| p_memo_id | string (uuid) | Y | 수정할 메모 ID |
+| p_body | string \| null | N | 수정할 본문. null이면 변경하지 않음. |
+| p_stocks | `Array<{ stock_id: string; goal_price: number \| null }> \| null` | N | 종목 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 종목 연결 해제. |
+| p_trade_event_ids | `string[] \| null` | N | 매매이벤트 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 연결 해제. |
+| p_news_ids | `string[] \| null` | N | 뉴스 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 연결 해제. |
+| p_sector_ids | `number[] \| null` | N | 섹터 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 연결 해제. |
+
+**응답**
+```typescript
+{
+  id: string
+  user_id: string
+  body: string
+  created_at: string
+  updated_at: string
+  stocks: Array<{
+    stock_id: string
+    ticker: string
+    name: string
+    asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+    goal_price: number | null
+  }>
+  trade_events: Array<{
+    event_id: string
+    event_type: 'buy' | 'sell'
+    event_date: string
+    ticker: string | null
+    name: string | null
+  }>
+  news: Array<{
+    news_id: string
+  }>
+  sectors: Array<{
+    sector_id: number
+    code: string
+    name: string
+  }>
+}
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | p_body가 빈 문자열. p_trade_event_ids에 buy/sell 이외 event_type 포함. goal_price <= 0. |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 403 | RLS 위반 (다른 사용자 메모 수정 시도) |
+| 404 | p_memo_id 또는 연결 엔티티 ID가 존재하지 않음 |
+
+---
+
+### 메모 삭제
+
+메모를 삭제한다. 모든 연결 junction 행(memo_stocks, memo_trade_events, memo_news, memo_sectors)이 cascade 삭제된다.
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memos').delete().eq('id', memoId)`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| id | string (uuid) | Y | 삭제할 메모 ID |
+
+**응답**
+```typescript
+null  // 삭제 성공 시 데이터 없음
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+| 403 | RLS 위반 (다른 사용자 메모 삭제 시도) |
+| 404 | 해당 ID 메모 없음 |
+
+---
+
+### 메모 엔티티 연결 추가
+
+기존 메모에 엔티티를 단건 추가한다. 특정 엔티티 타입 하나만 추가할 때 사용한다. 복수 타입을 한 번에 추가하거나 본문도 함께 수정할 경우 메모 수정 RPC(`update_memo_with_links`)를 사용한다.
+
+**종목 연결 추가**
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memo_stocks').insert({ memo_id, stock_id, goal_price })`
+- **인증**: 필요
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| memo_id | string (uuid) | Y | 메모 ID |
+| stock_id | string (uuid) | Y | 종목 ID |
+| goal_price | number \| null | N | 목표가 (원통화 기준, > 0) |
+
+**매매이벤트 연결 추가**
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memo_trade_events').insert({ memo_id, event_id })`
+- **인증**: 필요
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| memo_id | string (uuid) | Y | 메모 ID |
+| event_id | string (uuid) | Y | 계정 이벤트 ID (buy/sell만 허용) |
+
+**뉴스 연결 추가**
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memo_news').insert({ memo_id, news_id })`
+- **인증**: 필요
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| memo_id | string (uuid) | Y | 메모 ID |
+| news_id | string (uuid) | Y | 뉴스 ID |
+
+**섹터 연결 추가**
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memo_sectors').insert({ memo_id, sector_id })`
+- **인증**: 필요
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| memo_id | string (uuid) | Y | 메모 ID |
+| sector_id | number | Y | 섹터 ID |
+
+**공통 에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | goal_price <= 0. event_id가 buy/sell 이외 event_type. 이미 연결된 엔티티 중복 삽입. |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 403 | RLS 위반 (memo_id가 본인 메모가 아님) |
+| 404 | memo_id, stock_id, event_id, news_id, sector_id가 존재하지 않음 |
+
+---
+
+### 메모 엔티티 연결 해제
+
+기존 메모에서 엔티티 연결을 단건 해제한다. 연결이 삭제되어도 메모 본체는 유지된다.
+
+**종목 연결 해제**
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memo_stocks').delete().eq('memo_id', memoId).eq('stock_id', stockId)`
+- **인증**: 필요
+
+**매매이벤트 연결 해제**
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memo_trade_events').delete().eq('memo_id', memoId).eq('event_id', eventId)`
+- **인증**: 필요
+
+**뉴스 연결 해제**
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memo_news').delete().eq('memo_id', memoId).eq('news_id', newsId)`
+- **인증**: 필요
+
+**섹터 연결 해제**
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('memo_sectors').delete().eq('memo_id', memoId).eq('sector_id', sectorId)`
+- **인증**: 필요
+
+**공통 에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+| 403 | RLS 위반 (memo_id가 본인 메모가 아님) |
+| 404 | 해당 연결이 존재하지 않음 |
+
+---
+
+### 매매이벤트 생성 + 메모 동시 생성 (RPC)
+
+매수/매도 폼에서 메모를 함께 작성할 때 사용한다. account_event 등록과 memo 생성, 엔티티 연결(해당 이벤트 + 종목 자동 연결)을 단일 트랜잭션으로 처리한다.
+
+- **방식**: RPC (DB Function)
+- **호출**: `supabase.rpc('create_trade_event_with_memo', { p_event, p_memo_body, p_goal_price })`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| p_event | AccountEventInput | Y | 매매이벤트 등록 데이터 (AccountEvent 등록 파라미터와 동일. event_type은 'buy' 또는 'sell'만 허용). |
+| p_memo_body | string \| null | N | 메모 본문. null이면 메모를 생성하지 않고 이벤트만 등록한다. |
+| p_goal_price | number \| null | N | 메모-종목 연결 시 목표가. p_memo_body가 null이면 무시. |
+
+**응답**
+```typescript
+{
+  event: {
+    id: string
+    event_type: 'buy' | 'sell'
+    event_date: string
+    ticker: string
+    name: string
+    quantity: number
+    price_per_unit: number
+    currency: string
+    fee: number
+    tax: number
+    amount: number
+    created_at: string
+  }
+  memo: {
+    id: string
+    body: string
+    created_at: string
+    linked_stock_id: string | null    // 자동 연결된 종목 ID (stocks 테이블)
+    linked_event_id: string           // 자동 연결된 매매이벤트 ID
+    goal_price: number | null
+  } | null                            // p_memo_body가 null이면 null
+}
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | p_event.event_type이 buy/sell 이외. p_event 필수 필드 누락. p_goal_price <= 0. |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 403 | RLS 위반 |
+
+---
+
 ## 변경 이력
 
 | 이슈 | 변경 내용 |
@@ -954,3 +1528,4 @@ ExchangeRate-API를 호출하여 USD/KRW 환율을 반환한다. 1시간 캐시.
 | [핫픽스] Market Edge Function 인증 | Supabase 프로젝트가 ES256 JWT를 사용하나 플랫폼 레벨 검증이 미지원. `--no-verify-jwt`로 게이트웨이 검증 비활성화 후 `jose` 라이브러리로 함수 내부에서 ES256 직접 검증하도록 변경. |
 | [004] 대시보드 기획 수정 (00b3fb9) | TradeEvent 도메인 → AccountEvent 도메인으로 전면 대체 (5종 이벤트 통합, 타입별 필수/선택 필드 규칙 정의, CSV 함수명 변경 및 external_ref 기반 중복 방지 로직 반영). CashBalance 도메인 제거 (account_events 누적 계산으로 대체). Dashboard — 포트폴리오 요약 → KPI 데이터 조회로 확장 (총 평가액/원금/순수익/수익률/예수금(통화별)/누적 배당·수수료·세금 + holdings 집계 포함). 자산 히스토리 → daily_snapshots 기반으로 변경 (3개 라인 + 이벤트 마커 분리 조회, "전체" 기간 추가). 부문별 비중 파이 차트 API 제거. DailySnapshot 도메인 신규 추가 (스냅샷 조회). CorporateAction 도메인 신규 추가 (목록 조회, 관리자 등록). Market — 일별 종가 수집 cron, 일별 스냅샷 생성 cron, 환율 수집 cron 신규 추가. |
 | [005] 소셜 로그인 추가 (7ab2e6f) | Auth — Google 소셜 로그인(signInWithOAuth google) 신규 추가. Apple 소셜 로그인(signInWithOAuth apple) 신규 추가. createProfile 설명 보강 (소셜 로그인 첫 로그인 시 호출 조건, provider display name 자동 추출 로직). onAuthStateChange 이벤트 표 수정 (SIGNED_IN 항목에 소셜 로그인 완료 케이스 추가) 및 소셜 로그인 후 프로필 자동 생성 패턴 코드 예시 추가. |
+| [006] 메모/투자 일지 (7b4d051) | Sector 도메인 신규 추가 (섹터 목록 조회). Stock 도메인 신규 추가 (단건 조회, 등록+섹터자동추천 RPC, 섹터 수동 지정). Memo 도메인 신규 추가 (생성 RPC, 목록 조회 RPC, 상세 조회, 수정 RPC, 삭제, 엔티티 연결 추가 4종, 엔티티 연결 해제 4종, 매매이벤트+메모 동시 생성 RPC). |
