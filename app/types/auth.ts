@@ -12,3 +12,15 @@ export interface Profile {
 }
 
 export type AuthScreen = 'login' | 'signup';
+
+/** 지원하는 소셜 로그인 provider */
+export type OAuthProvider = 'google' | 'apple';
+
+export interface SignInWithOAuthParams {
+  provider: OAuthProvider;
+}
+
+export interface SignInWithOAuthResult {
+  provider: OAuthProvider;
+  url: string;
+}
