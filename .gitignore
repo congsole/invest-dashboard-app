@@ -47,3 +47,4 @@ app/supabase/.temp/
 
 # claude pipeline
 .claude/pipeline.log
+logs/
