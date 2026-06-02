@@ -1,5 +1,9 @@
 import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../utils/supabase';
+import type { OAuthProvider } from '../types/auth';
+
+export type { OAuthProvider } from '../types/auth';
 
 // ────────────────────────────────────────────
 // Types
@@ -156,6 +160,77 @@ export async function getSession(): Promise<AuthUser | null> {
     id: data.session.user.id,
     email: data.session.user.email ?? '',
   };
+}
+
+/**
+ * 소셜 로그인: Google 또는 Apple OAuth 플로우를 시스템 브라우저에서 실행한다.
+ * 인증 완료 후 딥링크로 앱에 복귀하면 onAuthStateChange → SIGNED_IN 이벤트가 발생한다.
+ * 신규 사용자의 경우 useAuth 훅에서 프로필 자동 생성을 처리한다.
+ */
+export async function signInWithOAuth(provider: OAuthProvider): Promise<void> {
+  const redirectTo = Linking.createURL('auth/callback');
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data.url) {
+    throw new Error('소셜 로그인 URL을 가져올 수 없습니다.');
+  }
+
+  // 시스템 브라우저에서 OAuth 페이지를 열고 딥링크 복귀를 대기한다.
+  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
+  if (result.type === 'cancel' || result.type === 'dismiss') {
+    throw new Error('USER_CANCELLED');
+  }
+
+  // 브라우저에서 딥링크로 복귀한 경우, URL에서 세션 토큰을 추출하여 설정
+  if (result.type === 'success' && result.url) {
+    const hashIndex = result.url.indexOf('#');
+    if (hashIndex !== -1) {
+      const hash = result.url.substring(hashIndex + 1);
+      const params = new URLSearchParams(hash);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (accessToken && refreshToken) {
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * 소셜 로그인 시 provider display name에서 닉네임을 추출한다.
+ * full_name → name → 이메일 @ 앞부분 → '사용자' 순서로 폴백한다.
+ * 닉네임 길이 제약(2~20자)에 맞게 잘라낸다.
+ */
+export function extractSocialNickname(
+  userMetadata: Record<string, unknown> | undefined,
+  email: string | undefined,
+): string {
+  const fullName = userMetadata?.full_name as string | undefined;
+  const name = userMetadata?.name as string | undefined;
+  const emailPrefix = email?.split('@')[0];
+
+  // 빈 문자열도 폴백 대상이므로 || 사용 (nullish coalescing 대신)
+  const raw = fullName || name || emailPrefix || '사용자';
+
+  // 닉네임 길이 제약: 2~20자
+  const trimmed = raw.slice(0, 20);
+  return trimmed.length >= 2 ? trimmed : '사용자';
 }
 
 /**
