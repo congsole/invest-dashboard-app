@@ -3,10 +3,11 @@
 # 사용법: bash .claude/watch-pipeline.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG="$SCRIPT_DIR/pipeline-status.log"
+ROOT="$(dirname "$SCRIPT_DIR")"
+LOG="$ROOT/logs/pipeline-status.log"
 
 if [ ! -f "$LOG" ]; then
-  echo "pipeline-status.log가 없습니다."
+  echo "logs/pipeline-status.log가 없습니다."
   exit 1
 fi
 
