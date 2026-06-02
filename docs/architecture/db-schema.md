@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: 7b4d051 — 2026-06-02*
+*최종 업데이트: 78dfc50 — 2026-06-02*
 
 ## 테이블
 
@@ -173,28 +173,30 @@
 ---
 
 ### stocks
-종목(주식·코인) 마스터. 시장별로 동일 티커가 중복될 수 있으므로 서로게이트 키를 사용한다. 종목 등록 시 `sector_id`를 자동 추천(미국 주식: Yahoo Finance GICS, 한국 주식: `kr_sector_map` 변환, 암호화폐: CRYPTO 고정) 후 사용자가 수동 보정 가능.
+종목(주식·코인) 마스터. 거래 여부와 무관한 진짜 마스터 테이블로, 보유 중이지 않은 관심 종목도 등록 가능하다. 시장별로 동일 티커가 중복될 수 있으므로 서로게이트 키를 사용한다. 종목 등록 시 `sector_id`를 자동 추천(미국 주식: Yahoo Finance GICS, 한국 주식: `kr_sector_map` 변환, 암호화폐: CRYPTO 고정) 후 수동 보정 가능. 쓰기는 FastAPI 서버(service role)를 통해서만 허용한다.
 
 | 컬럼 | 타입 | 기본값 | 제약 | 설명 |
 |------|------|--------|------|------|
 | id | uuid | gen_random_uuid() | PK | 기본 키 |
-| ticker | text | — | not null | 종목 코드 또는 코인 티커 |
-| asset_type | text | — | not null, CHECK (asset_type IN ('korean_stock', 'us_stock', 'crypto')) | 자산 유형 |
-| name | text | — | not null | 종목명 |
+| ticker | text | — | not null | 종목 코드 또는 코인 티커 (KR: '005930', US: 'AAPL', Crypto: 'BTC') |
+| name | text | — | not null | 종목명 (한글 우선, 없으면 영문) |
+| market | text | — | not null, CHECK (market IN ('KR', 'US', 'CRYPTO')) | 시장 구분 |
+| currency | text | — | not null | 거래 통화 (KRW / USD / KRW(업비트)) |
 | sector_id | int | — | nullable, FK → sectors(id) | 섹터 ID (GICS 분류). nullable — 미분류 허용. |
+| is_active | boolean | true | not null | 상장 여부 (상장폐지·거래중단 시 false, 행은 유지) |
 | created_at | timestamptz | now() | not null | 생성 시각 |
 
 **인덱스**
-- `idx_stocks_ticker_asset_type` ON (ticker, asset_type) — 종목 단건 조회 (UNIQUE 제약과 병행)
+- `idx_stocks_ticker_market` ON (ticker, market) — 종목 단건 조회 (UNIQUE 제약과 병행)
 - `idx_stocks_sector_id` ON (sector_id) — 섹터별 종목 목록 조회
+- `idx_stocks_name` ON (name) — 종목명 검색 (ilike 쿼리 지원)
 
 **UNIQUE 제약**
-- `uq_stocks_ticker_asset_type` ON (ticker, asset_type)
+- `uq_stocks_ticker_market` ON (ticker, market)
 
 **RLS 방향**
 - SELECT: 모든 인증 사용자 공개 조회 가능
-- INSERT / UPDATE: 본인이 직접 종목을 등록·수정하는 경우 허용 (`auth.uid()` 인증 필요). sector_id 수동 보정 포함.
-- DELETE: service_role만 허용
+- INSERT / UPDATE / DELETE: service_role만 허용 (앱에서 종목 추가 시 FastAPI 서버를 거쳐 upsert)
 
 ---
 
@@ -347,3 +349,4 @@ memo_sectors }o--|| sectors : "N:1 (sector_id FK, cascade)"
 | [004] 대시보드 기획 수정 (00b3fb9) | trade_events → account_events로 대체 (5종 이벤트 통합, nullable 필드, fx_rate_at_event/source/external_ref 추가). cash_balances 제거 (account_events 누적 계산으로 대체). daily_snapshots 테이블 추가. corporate_actions 테이블 추가. prices 테이블 추가. fx_rates 테이블 추가. ERD 관계 업데이트. |
 | [005] 소셜 로그인 추가 (7ab2e6f) | auth.identities 참조 섹션 추가 (Supabase 자동 관리, DDL 불필요). profiles 테이블 설명 보강 (소셜 로그인 시 생성 조건 및 닉네임 자동 설정 로직). ERD에 auth.users → auth.identities 관계 추가. |
 | [006] 메모/투자 일지 (7b4d051) | sectors 테이블 추가 (GICS 11 + 가상자산 12개 고정 시드). stocks 테이블 추가 (sector_id FK 포함, ticker+asset_type unique). kr_sector_map 테이블 추가 (네이버 업종 → GICS 매핑 시드). memos 테이블 추가. memo_stocks junction 테이블 추가 (goal_price 포함). memo_trade_events junction 테이블 추가. memo_news junction 테이블 추가. memo_sectors junction 테이블 추가. ERD 관계 9건 추가. |
+| [006] 종목 검색 기능 (78dfc50) | stocks 테이블 수정: `asset_type` 컬럼 제거, `market`(KR/US/CRYPTO) · `currency` · `is_active` 컬럼 추가. UNIQUE 제약 `(ticker, asset_type)` → `(ticker, market)` 변경. 인덱스 `idx_stocks_ticker_asset_type` → `idx_stocks_ticker_market` 변경, `idx_stocks_name` 추가. RLS 쓰기 정책 변경: 본인 직접 허용 → service_role 전용 (FastAPI 서버 경유 upsert). |

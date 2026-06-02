@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 7b4d051 — 2026-06-02*
+*최종 업데이트: 78dfc50 — 2026-06-02*
 
 ## 공통
 
@@ -975,28 +975,71 @@ Array<{
 
 ## Stock (종목 마스터)
 
-### 종목 조회 (단건)
+> **RLS 정책**: `stocks`는 공개 마스터. 읽기는 인증된 사용자 전체 허용. 쓰기(INSERT/UPDATE/DELETE)는 service_role 전용 — 앱에서 종목 추가 시 FastAPI 서버를 경유하여 upsert한다.
 
-ticker + asset_type 조합으로 종목 단건을 조회한다.
+### 로컬 종목 검색
+
+`stocks` 테이블에서 종목명 또는 티커로 ilike 검색한다. 검색어 2자 이상부터 호출하며, 디바운스 300ms를 권장한다. 결과가 0건이면 앱에서 외부 FastAPI 검색으로 자동 전환한다(외부 검색 API는 FastAPI 서버 엔드포인트이므로 이 명세 범위 외).
 
 - **방식**: REST (auto-generated)
-- **호출**: `supabase.from('stocks').select('*, sectors(id, code, name)').eq('ticker', ticker).eq('asset_type', assetType).maybeSingle()`
+- **호출**: `supabase.from('stocks').select('id, ticker, name, market, currency, sector_id, is_active, sectors(id, code, name)').or('ticker.ilike.%{q}%,name.ilike.%{q}%').eq('is_active', true).order('name', { ascending: true }).limit(30)`
+- **인증**: 필요
+
+**요청 파라미터 (쿼리)**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| q | string | Y | 검색어 (2자 이상). ticker 또는 name에 ilike 적용. |
+| market | `'KR' \| 'US' \| 'CRYPTO'` | N | 시장 필터. 미지정 시 전체 시장 검색. |
+
+**응답**
+```typescript
+Array<{
+  id: string
+  ticker: string
+  name: string
+  market: 'KR' | 'US' | 'CRYPTO'
+  currency: string              // 'KRW' | 'USD'
+  sector_id: number | null
+  is_active: boolean
+  sectors: {
+    id: number
+    code: string
+    name: string
+  } | null
+}>
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+
+---
+
+### 종목 조회 (단건)
+
+ticker + market 조합으로 종목 단건을 조회한다.
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('stocks').select('*, sectors(id, code, name)').eq('ticker', ticker).eq('market', market).maybeSingle()`
 - **인증**: 필요
 
 **요청 파라미터**
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
 | ticker | string | Y | 종목 코드 또는 코인 티커 |
-| asset_type | `'korean_stock' \| 'us_stock' \| 'crypto'` | Y | 자산 유형 |
+| market | `'KR' \| 'US' \| 'CRYPTO'` | Y | 시장 구분 |
 
 **응답**
 ```typescript
 {
   id: string
   ticker: string
-  asset_type: 'korean_stock' | 'us_stock' | 'crypto'
   name: string
+  market: 'KR' | 'US' | 'CRYPTO'
+  currency: string              // 'KRW' | 'USD'
   sector_id: number | null
+  is_active: boolean
   sectors: {
     id: number
     code: string
@@ -1015,34 +1058,37 @@ ticker + asset_type 조합으로 종목 단건을 조회한다.
 
 ### 종목 등록 또는 조회 + 섹터 자동 추천 (RPC)
 
-종목을 `stocks` 테이블에 등록하고 섹터 자동 추천 결과를 함께 반환한다. 이미 등록된 종목이면 기존 레코드를 그대로 반환한다. 섹터 자동 추천 규칙: 미국 주식은 Yahoo Finance GICS 섹터 코드를 직접 매핑, 한국 주식은 `kr_sector_map`을 거쳐 GICS 변환, 암호화폐는 CRYPTO 고정.
+종목을 `stocks` 테이블에 등록하고 섹터 자동 추천 결과를 함께 반환한다. 이미 등록된 종목이면 기존 레코드를 그대로 반환한다. 실제 upsert는 FastAPI 서버(service role)가 수행하며, 이 RPC는 앱에서 FastAPI 서버를 호출한 뒤 결과를 Supabase에서 재조회하는 흐름에서 쓰인다. 섹터 자동 추천 규칙: 미국 주식은 Yahoo Finance GICS 섹터 코드를 직접 매핑, 한국 주식은 `kr_sector_map`을 거쳐 GICS 변환, 암호화폐는 CRYPTO 고정.
 
 - **방식**: RPC (DB Function)
-- **호출**: `supabase.rpc('upsert_stock_with_sector', { p_ticker, p_asset_type, p_name, p_naver_industry })`
+- **호출**: `supabase.rpc('get_or_recommend_stock_sector', { p_ticker, p_market, p_name, p_currency, p_naver_industry })`
 - **인증**: 필요
 
 **요청 파라미터**
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
 | p_ticker | string | Y | 종목 코드 또는 코인 티커 |
-| p_asset_type | `'korean_stock' \| 'us_stock' \| 'crypto'` | Y | 자산 유형 |
+| p_market | `'KR' \| 'US' \| 'CRYPTO'` | Y | 시장 구분 |
 | p_name | string | Y | 종목명 |
-| p_naver_industry | string \| null | N | 한국 주식의 네이버 업종명. korean_stock이고 null이면 섹터 추천 불가(null 반환). |
+| p_currency | string | Y | 거래 통화 (KRW / USD) |
+| p_naver_industry | string \| null | N | 한국 주식의 네이버 업종명. KR이고 null이면 섹터 추천 불가(null 반환). |
 
 **응답**
 ```typescript
 {
   id: string
   ticker: string
-  asset_type: 'korean_stock' | 'us_stock' | 'crypto'
   name: string
+  market: 'KR' | 'US' | 'CRYPTO'
+  currency: string
+  is_active: boolean
   sector_id: number | null        // 자동 추천된 sector_id. 없으면 null.
   recommended_sector: {
     id: number
     code: string
     name: string
   } | null                        // 자동 추천 섹터 정보. 추천 불가 시 null.
-  is_new: boolean                 // true이면 신규 등록, false이면 기존 레코드 반환
+  is_new: boolean                 // true이면 신규 등록(FastAPI upsert 후 조회), false이면 기존 레코드
   created_at: string
 }
 ```
@@ -1050,18 +1096,18 @@ ticker + asset_type 조합으로 종목 단건을 조회한다.
 **에러 케이스**
 | 코드 | 상황 |
 |------|------|
-| 400 | p_asset_type 값 오류 |
+| 400 | p_market 값 오류 |
 | 401 | 인증 토큰 없음 또는 만료 |
 
 ---
 
 ### 종목 섹터 수동 지정/변경
 
-종목의 `sector_id`를 사용자가 직접 수정한다. 자동 추천 결과가 맞지 않을 때 보정에 사용한다.
+종목의 `sector_id`를 사용자가 직접 수정한다. 자동 추천 결과가 맞지 않을 때 보정에 사용한다. stocks 쓰기는 service_role 전용이므로 FastAPI 서버를 통해 호출해야 한다.
 
-- **방식**: REST (auto-generated)
-- **호출**: `supabase.from('stocks').update({ sector_id }).eq('id', stockId)`
-- **인증**: 필요
+- **방식**: RPC (DB Function — service_role 경유)
+- **호출**: FastAPI `PATCH /stocks/{id}/sector` → Supabase service_role로 `stocks.update({ sector_id })`
+- **인증**: 필요 (앱 → FastAPI JWT 검증 → service_role로 Supabase 업데이트)
 
 **요청 파라미터**
 | 파라미터 | 타입 | 필수 | 설명 |
@@ -1074,8 +1120,10 @@ ticker + asset_type 조합으로 종목 단건을 조회한다.
 {
   id: string
   ticker: string
-  asset_type: 'korean_stock' | 'us_stock' | 'crypto'
   name: string
+  market: 'KR' | 'US' | 'CRYPTO'
+  currency: string
+  is_active: boolean
   sector_id: number | null
   created_at: string
 }
@@ -1121,7 +1169,7 @@ ticker + asset_type 조합으로 종목 단건을 조회한다.
     stock_id: string
     ticker: string
     name: string
-    asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+    market: 'KR' | 'US' | 'CRYPTO'
     goal_price: number | null
   }>
   trade_events: Array<{
@@ -1187,7 +1235,7 @@ ticker + asset_type 조합으로 종목 단건을 조회한다.
       stock_id: string
       ticker: string
       name: string
-      asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+      market: 'KR' | 'US' | 'CRYPTO'
       goal_price: number | null
     }>
     trade_events: Array<{
@@ -1223,7 +1271,7 @@ ticker + asset_type 조합으로 종목 단건을 조회한다.
 메모 단건을 엔티티 연결 정보 포함하여 조회한다.
 
 - **방식**: REST (auto-generated)
-- **호출**: `supabase.from('memos').select('*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, asset_type)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name))').eq('id', memoId).single()`
+- **호출**: `supabase.from('memos').select('*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name))').eq('id', memoId).single()`
 - **인증**: 필요
 
 **요청 파라미터**
@@ -1246,7 +1294,9 @@ ticker + asset_type 조합으로 종목 단건을 조회한다.
       id: string
       ticker: string
       name: string
-      asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+      market: 'KR' | 'US' | 'CRYPTO'
+      currency: string
+      is_active: boolean
     }
   }>
   memo_trade_events: Array<{
@@ -1312,7 +1362,7 @@ ticker + asset_type 조합으로 종목 단건을 조회한다.
     stock_id: string
     ticker: string
     name: string
-    asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+    market: 'KR' | 'US' | 'CRYPTO'
     goal_price: number | null
   }>
   trade_events: Array<{
@@ -1529,3 +1579,4 @@ null  // 삭제 성공 시 데이터 없음
 | [004] 대시보드 기획 수정 (00b3fb9) | TradeEvent 도메인 → AccountEvent 도메인으로 전면 대체 (5종 이벤트 통합, 타입별 필수/선택 필드 규칙 정의, CSV 함수명 변경 및 external_ref 기반 중복 방지 로직 반영). CashBalance 도메인 제거 (account_events 누적 계산으로 대체). Dashboard — 포트폴리오 요약 → KPI 데이터 조회로 확장 (총 평가액/원금/순수익/수익률/예수금(통화별)/누적 배당·수수료·세금 + holdings 집계 포함). 자산 히스토리 → daily_snapshots 기반으로 변경 (3개 라인 + 이벤트 마커 분리 조회, "전체" 기간 추가). 부문별 비중 파이 차트 API 제거. DailySnapshot 도메인 신규 추가 (스냅샷 조회). CorporateAction 도메인 신규 추가 (목록 조회, 관리자 등록). Market — 일별 종가 수집 cron, 일별 스냅샷 생성 cron, 환율 수집 cron 신규 추가. |
 | [005] 소셜 로그인 추가 (7ab2e6f) | Auth — Google 소셜 로그인(signInWithOAuth google) 신규 추가. Apple 소셜 로그인(signInWithOAuth apple) 신규 추가. createProfile 설명 보강 (소셜 로그인 첫 로그인 시 호출 조건, provider display name 자동 추출 로직). onAuthStateChange 이벤트 표 수정 (SIGNED_IN 항목에 소셜 로그인 완료 케이스 추가) 및 소셜 로그인 후 프로필 자동 생성 패턴 코드 예시 추가. |
 | [006] 메모/투자 일지 (7b4d051) | Sector 도메인 신규 추가 (섹터 목록 조회). Stock 도메인 신규 추가 (단건 조회, 등록+섹터자동추천 RPC, 섹터 수동 지정). Memo 도메인 신규 추가 (생성 RPC, 목록 조회 RPC, 상세 조회, 수정 RPC, 삭제, 엔티티 연결 추가 4종, 엔티티 연결 해제 4종, 매매이벤트+메모 동시 생성 RPC). |
+| [006] 종목 검색 기능 (78dfc50) | Stock — 로컬 종목 검색 API 신규 추가 (stocks 테이블 ilike 검색, market 필터 지원). 종목 조회(단건) 파라미터 `asset_type` → `market`('KR'/'US'/'CRYPTO')으로 변경, 응답에 `currency`, `is_active` 추가. 종목 등록+섹터자동추천 RPC 함수명 `upsert_stock_with_sector` → `get_or_recommend_stock_sector`로 변경, 파라미터 `p_asset_type` → `p_market` · `p_currency` 추가, 응답에 `market`/`currency`/`is_active` 반영. 종목 섹터 수동 지정/변경 방식 REST → FastAPI 경유(service_role)로 변경(stocks 쓰기는 service_role 전용 정책 반영). Memo 도메인 전체 응답의 stock 필드 `asset_type` → `market` 변경, memo_stocks join 응답에 `currency`/`is_active` 추가. |

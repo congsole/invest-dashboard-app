@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 7b4d051 — 2026-06-02*
+*최종 업데이트: 78dfc50 — 2026-06-02*
 
 ## 엔터티
 
@@ -120,18 +120,20 @@ Supabase Auth가 관리하는 인증 제공자 연동 정보. `auth.identities` 
 | updated_at | timestamptz | 갱신 시각 | not null |
 
 ### Stock
-종목(주식·코인) 마스터. 시장별로 동일 티커가 중복될 수 있으므로 서로게이트 키 사용. DB 테이블명: `stocks`.
+종목(주식·코인) 마스터. 거래 여부와 무관한 진짜 마스터 테이블로, 보유 중이지 않은 관심 종목도 등록 가능하다. 시장별로 동일 티커가 중복될 수 있으므로 서로게이트 키 사용. 쓰기는 FastAPI 서버(service role)를 통해서만 허용(upsert). DB 테이블명: `stocks`.
 
 | 속성 | 타입 | 설명 | 제약 |
 |------|------|------|------|
 | id | uuid | 기본 키 | PK, not null |
-| ticker | text | 종목 코드 또는 코인 티커 | not null |
-| asset_type | enum | 자산 유형 (korean_stock / us_stock / crypto) | not null |
-| name | text | 종목명 | not null |
-| sector_id | int | 섹터 ID (GICS 분류) | FK → sectors(id), nullable |
+| ticker | text | 종목 코드 또는 코인 티커 (KR: '005930', US: 'AAPL', Crypto: 'BTC') | not null |
+| name | text | 종목명 (한글 우선, 없으면 영문) | not null |
+| market | text | 시장 구분 (KR / US / CRYPTO) | not null |
+| currency | text | 거래 통화 (KRW / USD / KRW(업비트)) | not null |
+| sector_id | int | 섹터 ID (GICS 분류, 적재 시 자동 추천 후 수동 보정 가능) | FK → sectors(id), nullable |
+| is_active | boolean | 상장 여부 (상장폐지·거래중단 시 false, 행은 유지) | not null, default true |
 | created_at | timestamptz | 생성 시각 | not null |
 
-> `(ticker, asset_type)` unique 제약.
+> `(ticker, market)` unique 제약. RLS: 읽기는 인증된 사용자 전체 허용, 쓰기는 service role만 허용.
 
 ### Sector
 섹터 마스터. GICS 11개 + 가상자산 = 12개 고정 시드. 모든 사용자가 공유하며 앱에서 수정하지 않는다. DB 테이블명: `sectors`.
@@ -289,3 +291,4 @@ c ∈ {KRW, USD, ...}.
 | [004] 대시보드 기획 수정 (00b3fb9) | TradeEvent → AccountEvent 전환 (5종 이벤트: buy/sell/deposit/withdraw/dividend, nullable 필드 추가, fx_rate_at_event/source/external_ref 추가). CashBalance 엔터티 제거 (account_events 누적 계산으로 대체). DailySnapshot 엔터티 추가. CorporateAction 엔터티 추가. Price 엔터티 추가. FxRate 엔터티 추가. 계산 규칙 섹션 추가 (원금/예수금/총 평가액/순수익/수익률/보유수량/평균매수가/환율 정책). 관계 업데이트. |
 | [005] 소셜 로그인 추가 (7ab2e6f) | Identity 엔터티 추가 (auth.identities, Supabase 관리). User 엔터티 설명에 소셜 로그인 통합 관리 및 자동 링킹 개념 추가. Profile 엔터티 설명에 소셜 로그인 첫 가입 시 닉네임 자동 설정 로직 추가. 관계에 User 1:N Identity 추가. |
 | [006] 메모/투자 일지 (7b4d051) | Stock 엔터티 추가 (sector_id 컬럼 포함). Sector 엔터티 추가 (GICS 11 + 가상자산 12개 고정 시드). KrSectorMap 엔터티 추가 (네이버 업종 → GICS 매핑). Memo 엔터티 추가. MemoStock junction 엔터티 추가 (goal_price 포함). MemoTradeEvent junction 엔터티 추가. MemoNews junction 엔터티 추가. MemoSector junction 엔터티 추가. 관계 7건 추가 (Stock-Sector, KrSectorMap-Sector, User-Memo, Memo-Stock N:M, Memo-AccountEvent N:M, Memo-News N:M, Memo-Sector N:M). |
+| [006] 종목 검색 기능 (78dfc50) | Stock 엔터티 재정의: `asset_type` 제거, `market`(KR/US/CRYPTO) 추가, `currency` 추가, `is_active` 추가. unique 제약 `(ticker, asset_type)` → `(ticker, market)` 변경. RLS 정책 명확화(읽기 전체 허용, 쓰기 service role 전용). 엔터티 설명에 "진짜 마스터 테이블" 역할(관심 종목 포함) 및 FastAPI 경유 upsert 정책 반영. |
