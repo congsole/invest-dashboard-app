@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: 6aab87b — 2026-06-04*
+*최종 업데이트: b892f6d — 2026-06-04*
 
 ## 테이블
 
@@ -158,22 +158,42 @@
 ---
 
 ### sectors
-섹터 마스터. GICS 11개 + 가상자산 = 12개 고정 시드. 모든 사용자가 공유하며 앱에서 수정하지 않는다. 종목(`stocks`)에서 참조하고 메모(`memo_sectors`)에서 테마로 연결된다.
+섹터 마스터. GICS 4단계 계층 구조(Sector → Industry Group → Industry → Sub-Industry). 기존 Level 1 시드 12개(GICS 11 + CRYPTO)는 유지되며, L2(~25개) · L3(~74개) · L4(~163개)가 추가되어 총 ~273개 행. 자기참조 FK(`parent_id`)로 계층 표현. 모든 사용자가 공유하며 앱에서 수정하지 않는다.
 
 | 컬럼 | 타입 | 기본값 | 제약 | 설명 |
 |------|------|--------|------|------|
-| id | int | — | PK | 섹터 기본 키 (1~12 고정) |
-| code | text | — | unique, not null | 섹터 코드 (IT / HEALTHCARE / FINANCIALS / CONS_DISC / CONS_STAPLES / COMM / INDUSTRIALS / MATERIALS / ENERGY / UTILITIES / REAL_ESTATE / CRYPTO) |
-| name | text | — | not null | 섹터 이름 (정보기술 / 헬스케어 / 금융 / 경기소비재 / 필수소비재 / 커뮤니케이션서비스 / 산업재 / 소재 / 에너지 / 유틸리티 / 부동산 / 가상자산) |
+| id | serial | — | PK | 섹터 기본 키. 기존 시드 1~12 유지, 신규는 13부터 자동 증가. |
+| code | text | — | unique, not null | 섹터 코드 (L1 예: IT, L4 예: SEMI_MFG) |
+| name | text | — | not null | 섹터 이름 한글 (예: 정보기술 / 반도체제조) |
+| name_en | text | — | nullable | 섹터 영문명 (yfinance 반환값 및 GICS 공식 영문명 매칭용. 예: Information Technology / Semiconductor Manufacturing) |
+| parent_id | int | — | nullable, FK → sectors(id) | 상위 섹터 ID. L1은 null, L2→L1, L3→L2, L4→L3 |
+| level | int | 1 | not null, CHECK (level BETWEEN 1 AND 4) | GICS 계층 레벨. 1=Sector, 2=Industry Group, 3=Industry, 4=Sub-Industry |
+| created_at | timestamptz | now() | not null | 생성 시각 |
+
+**계층 예시**
+```
+L1: 정보기술 (Information Technology)
+ └ L2: 반도체및반도체장비 (Semiconductors & Semiconductor Equipment)
+    └ L3: 반도체 (Semiconductors)
+       └ L4: 반도체제조 (Semiconductor Manufacturing)
+```
+
+**인덱스**
+- `idx_sectors_parent_id` ON (parent_id) — 하위 레벨 조회 (하위 섹터 트리 탐색)
+- `idx_sectors_level` ON (level) — 레벨별 필터 (메모 필터에서 L1·L2만 노출)
+
+**마이그레이션 주의사항**
+- `id`를 `serial`로 전환 시 시퀀스 시작값을 13 이상으로 설정하여 기존 FK(1~12) 보호.
+- 기존 12개 시드에 `level=1`, `parent_id=null`, `name_en` 채움.
 
 **RLS 방향**
 - SELECT: 모든 인증 사용자 공개 조회 가능
-- INSERT / UPDATE / DELETE: service_role만 허용 (고정 시드, 앱에서 수정 불가)
+- INSERT / UPDATE / DELETE: service_role만 허용 (앱에서 수정 불가)
 
 ---
 
 ### stocks
-종목(주식·코인) 마스터. 거래 여부와 무관한 진짜 마스터 테이블로, 보유 중이지 않은 관심 종목도 등록 가능하다. 시장별로 동일 티커가 중복될 수 있으므로 서로게이트 키를 사용한다. 종목 등록 시 `sector_id`를 자동 추천(미국 주식: Yahoo Finance GICS, 한국 주식: `kr_sector_map` 변환, 암호화폐: CRYPTO 고정) 후 수동 보정 가능. 쓰기는 FastAPI 서버(service role)를 통해서만 허용한다.
+종목(주식·코인) 마스터. 거래 여부와 무관한 진짜 마스터 테이블로, 보유 중이지 않은 관심 종목도 등록 가능하다. 시장별로 동일 티커가 중복될 수 있으므로 서로게이트 키를 사용한다. 종목 등록 시 yfinance `sector`+`industry`로 `sector_id`를 자동 추천(한국·미국 주식 동일 경로, 암호화폐: CRYPTO 고정) 후 수동 보정 가능. `sector_id`는 가능한 한 GICS Level 4(Sub-Industry)를 가리키며, 매핑 실패 시 매핑 가능한 최하위 레벨까지. 쓰기는 FastAPI 서버(service role)를 통해서만 허용한다.
 
 | 컬럼 | 타입 | 기본값 | 제약 | 설명 |
 |------|------|--------|------|------|
@@ -182,7 +202,7 @@
 | name | text | — | not null | 종목명 (한글 우선, 없으면 영문) |
 | market | text | — | not null, CHECK (market IN ('KR', 'US', 'CRYPTO')) | 시장 구분 |
 | currency | text | — | not null | 거래 통화 (KRW / USD / KRW(업비트)) |
-| sector_id | int | — | nullable, FK → sectors(id) | 섹터 ID (GICS 분류). nullable — 미분류 허용. |
+| sector_id | int | — | nullable, FK → sectors(id) | 섹터 ID. 가능한 한 GICS L4(Sub-Industry)를 가리킴. 매핑 실패 시 최하위 매핑 가능 레벨(L1까지). nullable — 미분류 허용. |
 | is_active | boolean | true | not null | 상장 여부 (상장폐지·거래중단 시 false, 행은 유지) |
 | created_at | timestamptz | now() | not null | 생성 시각 |
 
@@ -200,13 +220,19 @@
 
 ---
 
-### kr_sector_map
-네이버 업종명 → GICS 섹터 매핑 시드 테이블. 한국 주식 종목 등록 시 `sector_id` 자동 추천에 사용. 초기 시드는 보유·관심 종목 업종 위주로 구축 후 점진 확장.
+### ~~kr_sector_map~~ (폐기 — PRD-004)
+
+> **PRD-004에서 DROP됨.** yfinance 통일로 네이버 업종 → GICS 매핑이 불필요해졌다. 마이그레이션 시 `DROP TABLE kr_sector_map` 실행.
+
+---
+
+### gics_yfinance_map
+yfinance `industry` 문자열 → GICS Sub-Industry(L4) 매핑 테이블. yfinance 반환값이 GICS L4 코드와 정확히 일치하지 않는 경우를 수동으로 관리한다. 배치 적재 시 `industry` 문자열로 이 테이블을 먼저 조회하고, 없으면 `sectors.name_en` 직접 매칭을 시도한다.
 
 | 컬럼 | 타입 | 기본값 | 제약 | 설명 |
 |------|------|--------|------|------|
-| naver_industry | text | — | PK | 네이버 업종명 (예: 반도체) |
-| sector_id | int | — | not null, FK → sectors(id) | 매핑되는 GICS 섹터 ID |
+| yfinance_industry | text | — | PK | yfinance `industry` 반환 문자열 (예: Semiconductor Manufacturing) |
+| sector_id | int | — | not null, FK → sectors(id) | 매핑되는 GICS L4 섹터 ID |
 
 **RLS 방향**
 - SELECT: 모든 인증 사용자 공개 조회 가능
@@ -328,8 +354,9 @@ auth.users ||--o{ daily_snapshots : "1:N (user_id FK)"
 auth.users ||--o{ memos : "1:N (user_id FK)"
 account_events }o--o| prices : "N:1 (ticker + asset_type + event_date → prices)"
 corporate_actions }o--o| prices : "N:1 (ticker + asset_type + effective_date → prices)"
-stocks }o--o| sectors : "N:1 (sector_id FK)"
-kr_sector_map }o--|| sectors : "N:1 (sector_id FK)"
+stocks }o--o| sectors : "N:1 (sector_id FK, 목표: L4)"
+sectors }o--o| sectors : "자기참조 N:1 (parent_id FK, L1 parent_id=null)"
+gics_yfinance_map }o--|| sectors : "N:1 (sector_id FK → GICS L4)"
 memos ||--o{ memo_stocks : "1:N (memo_id FK, cascade)"
 memos ||--o{ memo_trade_events : "1:N (memo_id FK, cascade)"
 memos ||--o{ memo_news : "1:N (memo_id FK, cascade)"
@@ -352,3 +379,4 @@ memo_sectors }o--|| sectors : "N:1 (sector_id FK, cascade)"
 | [006] 종목 검색 기능 (78dfc50) | stocks 테이블 수정: `asset_type` 컬럼 제거, `market`(KR/US/CRYPTO) · `currency` · `is_active` 컬럼 추가. UNIQUE 제약 `(ticker, asset_type)` → `(ticker, market)` 변경. 인덱스 `idx_stocks_ticker_asset_type` → `idx_stocks_ticker_market` 변경, `idx_stocks_name` 추가. RLS 쓰기 정책 변경: 본인 직접 허용 → service_role 전용 (FastAPI 서버 경유 upsert). |
 | [006] 메모 필터 기능 수정 (11f2f4c) | DB 스키마 변경 없음. 필터 UX 동작 규칙 변경(필터 항목명 "매매이벤트 연관" → "매매 연관", 종목 필터 "직접 연결만 보기" 토글 제거, 같은 타입 내 OR · 타입 간 AND 결합 명확화, "연결 없음" 필터의 다른 필터와 상호 배타적 동작)은 앱 레이어에만 영향. |
 | [006] 메모 필터 UI 수정 (6aab87b) | DB 스키마 변경 없음. 필터 UI 레이아웃 변경(단일 목록 → 세 줄 구조: 토글 행 / 종목 행 / 섹터 행, "연결 없음"의 토글 행 이동, 결합 규칙 표현 변경)은 앱 레이어에만 영향. |
+| [007] 종목 분류 GICS 계층화 (b892f6d) | sectors 테이블 전면 개편: `id` int → serial(시퀀스 시작값 13 이상), `name_en`/`parent_id`/`level`/`created_at` 컬럼 추가, GICS 4단계(L1~L4) 자기참조 계층 구조 도입, 인덱스 `idx_sectors_parent_id`·`idx_sectors_level` 추가. stocks 테이블: `sector_id` 의미 변경(L1 고정 → 가능한 한 L4 Sub-Industry, 매핑 실패 시 최하위 레벨). kr_sector_map 테이블 폐기(DROP). gics_yfinance_map 테이블 신규 추가(yfinance industry 문자열 → GICS L4 sector_id 매핑). ERD 관계 업데이트: kr_sector_map 제거, sectors 자기참조·gics_yfinance_map 추가. |

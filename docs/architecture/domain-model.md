@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 6aab87b — 2026-06-04*
+*최종 업데이트: b892f6d — 2026-06-04*
 
 ## 엔터티
 
@@ -129,28 +129,37 @@ Supabase Auth가 관리하는 인증 제공자 연동 정보. `auth.identities` 
 | name | text | 종목명 (한글 우선, 없으면 영문) | not null |
 | market | text | 시장 구분 (KR / US / CRYPTO) | not null |
 | currency | text | 거래 통화 (KRW / USD / KRW(업비트)) | not null |
-| sector_id | int | 섹터 ID (GICS 분류, 적재 시 자동 추천 후 수동 보정 가능) | FK → sectors(id), nullable |
+| sector_id | int | 섹터 ID. 가능한 한 GICS Level 4(Sub-Industry)를 가리킴. yfinance 매핑 실패 시 매핑 가능한 최하위 레벨(L1까지). 적재 시 자동 추천 후 수동 보정 가능. | FK → sectors(id), nullable |
 | is_active | boolean | 상장 여부 (상장폐지·거래중단 시 false, 행은 유지) | not null, default true |
 | created_at | timestamptz | 생성 시각 | not null |
 
 > `(ticker, market)` unique 제약. RLS: 읽기는 인증된 사용자 전체 허용, 쓰기는 service role만 허용.
 
 ### Sector
-섹터 마스터. GICS 11개 + 가상자산 = 12개 고정 시드. 모든 사용자가 공유하며 앱에서 수정하지 않는다. DB 테이블명: `sectors`.
+섹터 마스터. GICS 4단계 계층 구조(Sector → Industry Group → Industry → Sub-Industry). 기존 Level 1 시드 12개(GICS 11 + CRYPTO)는 유지되며, L2(~25개) · L3(~74개) · L4(~163개)가 추가되어 총 ~273개 행이 등록된다. 모든 사용자가 공유하며 앱에서 수정하지 않는다. DB 테이블명: `sectors`.
 
 | 속성 | 타입 | 설명 | 제약 |
 |------|------|------|------|
-| id | int | 기본 키 | PK, not null |
-| code | text | 섹터 코드 (IT / HEALTHCARE / FINANCIALS / CONS_DISC / CONS_STAPLES / COMM / INDUSTRIALS / MATERIALS / ENERGY / UTILITIES / REAL_ESTATE / CRYPTO) | unique, not null |
-| name | text | 섹터 이름 (정보기술 / 헬스케어 / 금융 / 경기소비재 / 필수소비재 / 커뮤니케이션서비스 / 산업재 / 소재 / 에너지 / 유틸리티 / 부동산 / 가상자산) | not null |
+| id | serial | 기본 키 | PK, not null |
+| code | text | 섹터 코드 (L1 예: IT, L4 예: SEMI_MFG) | unique, not null |
+| name | text | 섹터 이름 (한글. 예: 정보기술 / 반도체제조) | not null |
+| name_en | text | 섹터 영문명 (yfinance 반환값 및 GICS 공식 영문명 매칭용. 예: Information Technology / Semiconductor Manufacturing) | nullable |
+| parent_id | int | 상위 섹터 ID. L1은 null, L2→L1, L3→L2, L4→L3 | FK → sectors(id), nullable |
+| level | int | GICS 계층 레벨. 1=Sector, 2=Industry Group, 3=Industry, 4=Sub-Industry | not null, default 1 |
+| created_at | timestamptz | 생성 시각 | not null, default now() |
 
-### KrSectorMap
-네이버 업종명 → GICS 섹터 매핑 테이블. 한국 주식의 섹터 자동 추천용 시드 테이블. DB 테이블명: `kr_sector_map`.
+> L1은 `parent_id = null`. 계층 예시: 정보기술(L1) → 반도체및반도체장비(L2) → 반도체(L3) → 반도체제조(L4).
+> 인덱스: `idx_sectors_parent_id` ON (parent_id), `idx_sectors_level` ON (level).
+
+### GicsYfinanceMap
+yfinance `industry` 문자열 → GICS Sub-Industry(L4) code 매핑 테이블. yfinance 반환값이 GICS L4와 1:1로 일치하지 않는 경우를 수동으로 관리한다. DB 테이블명: `gics_yfinance_map`.
 
 | 속성 | 타입 | 설명 | 제약 |
 |------|------|------|------|
-| naver_industry | text | 네이버 업종명 (예: 반도체) | PK, not null |
-| sector_id | int | 매핑되는 GICS 섹터 ID | FK → sectors(id), not null |
+| yfinance_industry | text | yfinance `industry` 문자열 (예: Semiconductor Manufacturing) | PK, not null |
+| sector_id | int | 매핑되는 GICS L4 섹터 ID | FK → sectors(id), not null |
+
+> ~~KrSectorMap~~ — PRD-004에서 폐기됨. yfinance 통일로 네이버 업종 매핑이 불필요해졌다. 마이그레이션 시 `kr_sector_map` 테이블 DROP.
 
 ### Memo
 사용자의 투자 일지 메모 본체. 0개 이상의 엔터티(종목·매매이벤트·뉴스·섹터)와 연결될 수 있다. 수정·삭제 가능한 주관적 기록으로 금융 이벤트의 무수정 원칙 적용 대상이 아니다. DB 테이블명: `memos`.
@@ -206,8 +215,9 @@ Supabase Auth가 관리하는 인증 제공자 연동 정보. `auth.identities` 
 | User 1:N DailySnapshot | 한 사용자는 날짜별 자산 스냅샷을 가진다. (user_id, snapshot_date) unique. |
 | AccountEvent N:1 Price | 매수/매도 이벤트의 ticker+asset_type+date로 Price 조회. |
 | CorporateAction N:1 Price | 종목 분할 등 기업 액션은 해당 ticker의 가격 데이터와 연계. |
-| Stock N:1 Sector | 종목은 하나의 섹터에 속한다 (nullable). 종목 등록 시 자동 추천 후 수동 보정 가능. |
-| KrSectorMap N:1 Sector | 네이버 업종명은 하나의 GICS 섹터로 매핑된다. |
+| Stock N:1 Sector | 종목은 하나의 섹터에 속한다 (nullable). 가능한 한 Level 4(Sub-Industry)를 가리킴. 종목 등록 시 yfinance sector+industry로 자동 추천, 수동 보정 가능. |
+| Sector N:1 Sector (자기참조) | 각 섹터는 상위 섹터를 가질 수 있다. L1은 parent_id=null, L2~L4는 상위 레벨 참조. |
+| GicsYfinanceMap N:1 Sector | yfinance industry 문자열은 하나의 GICS L4 섹터로 매핑된다. |
 | User 1:N Memo | 한 사용자는 여러 메모를 가진다. |
 | Memo N:M Stock | 한 메모는 여러 종목에 연결될 수 있고, 하나의 종목은 여러 메모에 연결될 수 있다 (MemoStock junction). |
 | Memo N:M AccountEvent | 한 메모는 여러 매매이벤트에 연결될 수 있다 (MemoTradeEvent junction, buy/sell만). |
@@ -294,3 +304,4 @@ c ∈ {KRW, USD, ...}.
 | [006] 종목 검색 기능 (78dfc50) | Stock 엔터티 재정의: `asset_type` 제거, `market`(KR/US/CRYPTO) 추가, `currency` 추가, `is_active` 추가. unique 제약 `(ticker, asset_type)` → `(ticker, market)` 변경. RLS 정책 명확화(읽기 전체 허용, 쓰기 service role 전용). 엔터티 설명에 "진짜 마스터 테이블" 역할(관심 종목 포함) 및 FastAPI 경유 upsert 정책 반영. |
 | [006] 메모 필터 기능 수정 (11f2f4c) | 엔터티·속성·관계 변경 없음. 필터 동작 규칙 변경: (1) 필터 항목명 "매매이벤트 연관" → "매매 연관". (2) 종목 필터 4.1 규칙에서 "직접 연결만 보기" 토글 제거 — 대신 "종목 X + 매매 연관" 동시 선택으로 동일 효과 구현. (3) 필터 결합 방식 명확화: 같은 타입 내 복수 선택 → OR, 타입 간 → AND. (4) "연결 없음" 필터는 다른 필터와 상호 배타적으로 동작(선택 시 나머지 자동 해제). |
 | [006] 메모 필터 UI 수정 (6aab87b) | 엔터티·속성·관계 변경 없음. 필터 UI 레이아웃 변경: 단일 목록 방식 → 세 줄 구조(토글 행 / 종목 행 / 섹터 행). 토글 행에 매매 이벤트·뉴스 연관·연결 없음 토글 배치. "연결 없음"이 별도 필터 항목에서 토글 행으로 이동. 결합 규칙 표현 변경: "같은 타입 내 → OR, 타입 간 → AND" → "같은 행 내 → OR, 다른 행/타입 간 → AND". |
+| [007] 종목 분류 GICS 계층화 (b892f6d) | Sector 엔터티 전면 개편: `id` int → serial, `name_en`/`parent_id`/`level`/`created_at` 속성 추가. GICS 4단계(L1~L4) 자기참조 계층 구조 도입. KrSectorMap 엔터티 폐기 (kr_sector_map 테이블 DROP). GicsYfinanceMap 엔터티 신규 추가 (yfinance industry → GICS L4 매핑). Stock.sector_id 의미 변경: L1 고정 → 가능한 한 L4(Sub-Industry) 가리킴. 관계 변경: KrSectorMap-Sector 제거, Sector 자기참조 추가, GicsYfinanceMap-Sector 추가. |
