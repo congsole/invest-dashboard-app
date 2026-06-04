@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 11f2f4c — 2026-06-04*
+*최종 업데이트: 6aab87b — 2026-06-04*
 
 ## 엔터티
 
@@ -293,3 +293,4 @@ c ∈ {KRW, USD, ...}.
 | [006] 메모/투자 일지 (7b4d051) | Stock 엔터티 추가 (sector_id 컬럼 포함). Sector 엔터티 추가 (GICS 11 + 가상자산 12개 고정 시드). KrSectorMap 엔터티 추가 (네이버 업종 → GICS 매핑). Memo 엔터티 추가. MemoStock junction 엔터티 추가 (goal_price 포함). MemoTradeEvent junction 엔터티 추가. MemoNews junction 엔터티 추가. MemoSector junction 엔터티 추가. 관계 7건 추가 (Stock-Sector, KrSectorMap-Sector, User-Memo, Memo-Stock N:M, Memo-AccountEvent N:M, Memo-News N:M, Memo-Sector N:M). |
 | [006] 종목 검색 기능 (78dfc50) | Stock 엔터티 재정의: `asset_type` 제거, `market`(KR/US/CRYPTO) 추가, `currency` 추가, `is_active` 추가. unique 제약 `(ticker, asset_type)` → `(ticker, market)` 변경. RLS 정책 명확화(읽기 전체 허용, 쓰기 service role 전용). 엔터티 설명에 "진짜 마스터 테이블" 역할(관심 종목 포함) 및 FastAPI 경유 upsert 정책 반영. |
 | [006] 메모 필터 기능 수정 (11f2f4c) | 엔터티·속성·관계 변경 없음. 필터 동작 규칙 변경: (1) 필터 항목명 "매매이벤트 연관" → "매매 연관". (2) 종목 필터 4.1 규칙에서 "직접 연결만 보기" 토글 제거 — 대신 "종목 X + 매매 연관" 동시 선택으로 동일 효과 구현. (3) 필터 결합 방식 명확화: 같은 타입 내 복수 선택 → OR, 타입 간 → AND. (4) "연결 없음" 필터는 다른 필터와 상호 배타적으로 동작(선택 시 나머지 자동 해제). |
+| [006] 메모 필터 UI 수정 (6aab87b) | 엔터티·속성·관계 변경 없음. 필터 UI 레이아웃 변경: 단일 목록 방식 → 세 줄 구조(토글 행 / 종목 행 / 섹터 행). 토글 행에 매매 이벤트·뉴스 연관·연결 없음 토글 배치. "연결 없음"이 별도 필터 항목에서 토글 행으로 이동. 결합 규칙 표현 변경: "같은 타입 내 → OR, 타입 간 → AND" → "같은 행 내 → OR, 다른 행/타입 간 → AND". |
