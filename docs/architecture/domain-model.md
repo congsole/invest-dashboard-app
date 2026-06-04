@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 7ab2e6f — 2026-06-01*
+*최종 업데이트: 78dfc50 — 2026-06-02*
 
 ## 엔터티
 
@@ -119,6 +119,83 @@ Supabase Auth가 관리하는 인증 제공자 연동 정보. `auth.identities` 
 | usd_krw | numeric | USD/KRW 환율 | not null |
 | updated_at | timestamptz | 갱신 시각 | not null |
 
+### Stock
+종목(주식·코인) 마스터. 거래 여부와 무관한 진짜 마스터 테이블로, 보유 중이지 않은 관심 종목도 등록 가능하다. 시장별로 동일 티커가 중복될 수 있으므로 서로게이트 키 사용. 쓰기는 FastAPI 서버(service role)를 통해서만 허용(upsert). DB 테이블명: `stocks`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| id | uuid | 기본 키 | PK, not null |
+| ticker | text | 종목 코드 또는 코인 티커 (KR: '005930', US: 'AAPL', Crypto: 'BTC') | not null |
+| name | text | 종목명 (한글 우선, 없으면 영문) | not null |
+| market | text | 시장 구분 (KR / US / CRYPTO) | not null |
+| currency | text | 거래 통화 (KRW / USD / KRW(업비트)) | not null |
+| sector_id | int | 섹터 ID (GICS 분류, 적재 시 자동 추천 후 수동 보정 가능) | FK → sectors(id), nullable |
+| is_active | boolean | 상장 여부 (상장폐지·거래중단 시 false, 행은 유지) | not null, default true |
+| created_at | timestamptz | 생성 시각 | not null |
+
+> `(ticker, market)` unique 제약. RLS: 읽기는 인증된 사용자 전체 허용, 쓰기는 service role만 허용.
+
+### Sector
+섹터 마스터. GICS 11개 + 가상자산 = 12개 고정 시드. 모든 사용자가 공유하며 앱에서 수정하지 않는다. DB 테이블명: `sectors`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| id | int | 기본 키 | PK, not null |
+| code | text | 섹터 코드 (IT / HEALTHCARE / FINANCIALS / CONS_DISC / CONS_STAPLES / COMM / INDUSTRIALS / MATERIALS / ENERGY / UTILITIES / REAL_ESTATE / CRYPTO) | unique, not null |
+| name | text | 섹터 이름 (정보기술 / 헬스케어 / 금융 / 경기소비재 / 필수소비재 / 커뮤니케이션서비스 / 산업재 / 소재 / 에너지 / 유틸리티 / 부동산 / 가상자산) | not null |
+
+### KrSectorMap
+네이버 업종명 → GICS 섹터 매핑 테이블. 한국 주식의 섹터 자동 추천용 시드 테이블. DB 테이블명: `kr_sector_map`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| naver_industry | text | 네이버 업종명 (예: 반도체) | PK, not null |
+| sector_id | int | 매핑되는 GICS 섹터 ID | FK → sectors(id), not null |
+
+### Memo
+사용자의 투자 일지 메모 본체. 0개 이상의 엔터티(종목·매매이벤트·뉴스·섹터)와 연결될 수 있다. 수정·삭제 가능한 주관적 기록으로 금융 이벤트의 무수정 원칙 적용 대상이 아니다. DB 테이블명: `memos`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| id | uuid | 기본 키 | PK, not null |
+| user_id | uuid | 사용자 ID | FK → auth.users(id), not null |
+| body | text | 메모 본문 | not null |
+| created_at | timestamptz | 작성 일시 (달력 배치 기준) | not null |
+| updated_at | timestamptz | 수정 시각 | not null |
+
+### MemoStock
+메모-종목 연결 junction 테이블. 종목 연결 시 목표가를 함께 기록할 수 있다. DB 테이블명: `memo_stocks`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| memo_id | uuid | 메모 ID | PK (복합), FK → memos(id) on delete cascade |
+| stock_id | uuid | 종목 ID | PK (복합), FK → stocks(id) on delete cascade |
+| goal_price | numeric | 목표가 (해당 종목 원통화 기준, 표시 시 KRW 환산) | nullable |
+
+### MemoTradeEvent
+메모-매매이벤트 연결 junction 테이블. 매수/매도 이유 기록에 사용. 참조 대상은 `account_events.event_type in ('buy', 'sell')`로 제한. DB 테이블명: `memo_trade_events`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| memo_id | uuid | 메모 ID | PK (복합), FK → memos(id) on delete cascade |
+| event_id | uuid | 계정 이벤트 ID | PK (복합), FK → account_events(id) on delete cascade |
+
+### MemoNews
+메모-뉴스 연결 junction 테이블. 뉴스 스크랩 메모에 사용. DB 테이블명: `memo_news`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| memo_id | uuid | 메모 ID | PK (복합), FK → memos(id) on delete cascade |
+| news_id | uuid | 뉴스 ID | PK (복합), FK → news(id) on delete cascade |
+
+### MemoSector
+메모-섹터 연결 junction 테이블. 섹터(테마) 기반 메모에 사용. DB 테이블명: `memo_sectors`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| memo_id | uuid | 메모 ID | PK (복합), FK → memos(id) on delete cascade |
+| sector_id | int | 섹터 ID | PK (복합), FK → sectors(id) on delete cascade |
+
 ## 관계
 
 | 관계 | 설명 |
@@ -129,6 +206,13 @@ Supabase Auth가 관리하는 인증 제공자 연동 정보. `auth.identities` 
 | User 1:N DailySnapshot | 한 사용자는 날짜별 자산 스냅샷을 가진다. (user_id, snapshot_date) unique. |
 | AccountEvent N:1 Price | 매수/매도 이벤트의 ticker+asset_type+date로 Price 조회. |
 | CorporateAction N:1 Price | 종목 분할 등 기업 액션은 해당 ticker의 가격 데이터와 연계. |
+| Stock N:1 Sector | 종목은 하나의 섹터에 속한다 (nullable). 종목 등록 시 자동 추천 후 수동 보정 가능. |
+| KrSectorMap N:1 Sector | 네이버 업종명은 하나의 GICS 섹터로 매핑된다. |
+| User 1:N Memo | 한 사용자는 여러 메모를 가진다. |
+| Memo N:M Stock | 한 메모는 여러 종목에 연결될 수 있고, 하나의 종목은 여러 메모에 연결될 수 있다 (MemoStock junction). |
+| Memo N:M AccountEvent | 한 메모는 여러 매매이벤트에 연결될 수 있다 (MemoTradeEvent junction, buy/sell만). |
+| Memo N:M News | 한 메모는 여러 뉴스에 연결될 수 있다 (MemoNews junction). |
+| Memo N:M Sector | 한 메모는 여러 섹터에 연결될 수 있다 (MemoSector junction). |
 
 ## 계산 규칙
 
@@ -206,3 +290,5 @@ c ∈ {KRW, USD, ...}.
 | [003] 메인 대시보드 | TradeEvent, CashBalance 엔터티 추가. 관계 User 1:N TradeEvent, User 1:N CashBalance 추가. |
 | [004] 대시보드 기획 수정 (00b3fb9) | TradeEvent → AccountEvent 전환 (5종 이벤트: buy/sell/deposit/withdraw/dividend, nullable 필드 추가, fx_rate_at_event/source/external_ref 추가). CashBalance 엔터티 제거 (account_events 누적 계산으로 대체). DailySnapshot 엔터티 추가. CorporateAction 엔터티 추가. Price 엔터티 추가. FxRate 엔터티 추가. 계산 규칙 섹션 추가 (원금/예수금/총 평가액/순수익/수익률/보유수량/평균매수가/환율 정책). 관계 업데이트. |
 | [005] 소셜 로그인 추가 (7ab2e6f) | Identity 엔터티 추가 (auth.identities, Supabase 관리). User 엔터티 설명에 소셜 로그인 통합 관리 및 자동 링킹 개념 추가. Profile 엔터티 설명에 소셜 로그인 첫 가입 시 닉네임 자동 설정 로직 추가. 관계에 User 1:N Identity 추가. |
+| [006] 메모/투자 일지 (7b4d051) | Stock 엔터티 추가 (sector_id 컬럼 포함). Sector 엔터티 추가 (GICS 11 + 가상자산 12개 고정 시드). KrSectorMap 엔터티 추가 (네이버 업종 → GICS 매핑). Memo 엔터티 추가. MemoStock junction 엔터티 추가 (goal_price 포함). MemoTradeEvent junction 엔터티 추가. MemoNews junction 엔터티 추가. MemoSector junction 엔터티 추가. 관계 7건 추가 (Stock-Sector, KrSectorMap-Sector, User-Memo, Memo-Stock N:M, Memo-AccountEvent N:M, Memo-News N:M, Memo-Sector N:M). |
+| [006] 종목 검색 기능 (78dfc50) | Stock 엔터티 재정의: `asset_type` 제거, `market`(KR/US/CRYPTO) 추가, `currency` 추가, `is_active` 추가. unique 제약 `(ticker, asset_type)` → `(ticker, market)` 변경. RLS 정책 명확화(읽기 전체 허용, 쓰기 service role 전용). 엔터티 설명에 "진짜 마스터 테이블" 역할(관심 종목 포함) 및 FastAPI 경유 upsert 정책 반영. |

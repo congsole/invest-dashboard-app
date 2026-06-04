@@ -1,0 +1,555 @@
+/**
+ * MemoListScreen.tsx — 메모 목록 화면
+ *
+ * - 달력형 / 리스트형 전환 토글
+ * - 필터 (종목/매매이벤트/뉴스/섹터/연결 없음, AND 결합)
+ * - 렌더링 최적화: initialLoading(초기), refreshing(당김 새로고침) 분리
+ */
+
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+  SafeAreaView,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
+  Modal,
+  TextInput,
+  ScrollView,
+} from 'react-native';
+import { useMemos } from '../hooks/useMemos';
+import { CalendarView } from '../components/CalendarView';
+import { MemoCard } from '../components/MemoCard';
+import { MemoFilter } from '../components/MemoFilter';
+import {
+  MemoItem,
+  MemoFilterState,
+  DEFAULT_FILTER_STATE,
+  ListMemosParams,
+} from '../types/memo';
+import { Sector, Stock } from '../types/memo';
+import { getSectors, searchStocks } from '../services/memo';
+
+// ────────────────────────────────────────────
+// 뷰 타입
+// ────────────────────────────────────────────
+
+type ViewMode = 'calendar' | 'list';
+
+// ────────────────────────────────────────────
+// 날짜 유틸
+// ────────────────────────────────────────────
+
+function getMonthRange(year: number, month: number): { from: string; to: string } {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const lastDay = new Date(year, month, 0).getDate();
+  return {
+    from: `${year}-${pad(month)}-01`,
+    to: `${year}-${pad(month)}-${lastDay}`,
+  };
+}
+
+function filterToParams(filter: MemoFilterState): ListMemosParams {
+  return {
+    p_stock_id: filter.stockId ?? null,
+    p_include_trade_events: filter.includeTradeEvents,
+    p_trade_events_only: filter.tradeEventsOnly,
+    p_news_only: filter.newsOnly,
+    p_sector_id: filter.sectorId ?? null,
+    p_no_links: filter.noLinks,
+  };
+}
+
+// ────────────────────────────────────────────
+// Props
+// ────────────────────────────────────────────
+
+interface MemoListScreenProps {
+  onMemoPress: (memoId: string) => void;
+  onAddMemo: () => void;
+}
+
+// ────────────────────────────────────────────
+// 종목 검색 모달
+// ────────────────────────────────────────────
+
+interface StockPickerModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onSelect: (stock: Stock) => void;
+}
+
+function StockPickerModal({ visible, onClose, onSelect }: StockPickerModalProps) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Stock[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      setQuery('');
+      setResults([]);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (query.trim().length < 1) {
+      setResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await searchStocks(query.trim());
+        setResults(data);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={pickerStyles.container}>
+        <View style={pickerStyles.header}>
+          <Text style={pickerStyles.title}>종목 선택</Text>
+          <TouchableOpacity onPress={onClose}>
+            <Text style={pickerStyles.closeText}>닫기</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={pickerStyles.searchRow}>
+          <TextInput
+            style={pickerStyles.input}
+            placeholder="종목명 또는 티커 검색"
+            placeholderTextColor="#737688"
+            value={query}
+            onChangeText={setQuery}
+            autoFocus
+            autoCorrect={false}
+          />
+        </View>
+        {searching && (
+          <ActivityIndicator style={{ marginTop: 20 }} color="#003ec7" />
+        )}
+        <FlatList
+          data={results}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={pickerStyles.resultItem}
+              onPress={() => {
+                onSelect(item);
+                onClose();
+              }}
+            >
+              <Text style={pickerStyles.ticker}>{item.ticker}</Text>
+              <Text style={pickerStyles.name}>{item.name}</Text>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            query.length > 0 && !searching ? (
+              <Text style={pickerStyles.emptyText}>검색 결과가 없습니다</Text>
+            ) : null
+          }
+        />
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+const pickerStyles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f8f9ff' },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  title: { fontSize: 18, fontWeight: '700', color: '#0b1c30' },
+  closeText: { fontSize: 14, color: '#003ec7', fontWeight: '600' },
+  searchRow: { paddingHorizontal: 20, marginBottom: 8 },
+  input: {
+    backgroundColor: '#dce9ff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#0b1c30',
+  },
+  resultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5eeff',
+    gap: 12,
+  },
+  ticker: { fontSize: 13, fontWeight: '700', color: '#003ec7', width: 60 },
+  name: { fontSize: 14, color: '#0b1c30', flex: 1 },
+  emptyText: { textAlign: 'center', marginTop: 40, color: '#737688', fontSize: 14 },
+});
+
+// ────────────────────────────────────────────
+// MemoListScreen
+// ────────────────────────────────────────────
+
+export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) {
+  const today = new Date();
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [calYear, setCalYear] = useState(today.getFullYear());
+  const [calMonth, setCalMonth] = useState(today.getMonth() + 1);
+  const [filter, setFilter] = useState<MemoFilterState>(DEFAULT_FILTER_STATE);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [stockPickerVisible, setStockPickerVisible] = useState(false);
+
+  const { allMemos, calendarSummary, initialLoading, refreshing, loadingMore, error, fetch, refresh, loadMore, hasMore } = useMemos();
+
+  // 초기 로드
+  useEffect(() => {
+    fetch(filterToParams(filter));
+    getSectors().then(setSectors).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetch]);
+
+  // 달력형: 월 변경 시 데이터 재조회
+  useEffect(() => {
+    if (viewMode === 'calendar') {
+      const { from, to } = getMonthRange(calYear, calMonth);
+      fetch({ ...filterToParams(filter), p_from: from, p_to: to });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calYear, calMonth, viewMode, fetch]);
+
+  const handleFilterChange = useCallback(
+    (updated: Partial<MemoFilterState>) => {
+      const newFilter = { ...filter, ...updated };
+      setFilter(newFilter);
+      const params = filterToParams(newFilter);
+      if (viewMode === 'calendar') {
+        const { from, to } = getMonthRange(calYear, calMonth);
+        fetch({ ...params, p_from: from, p_to: to });
+      } else {
+        fetch(params);
+      }
+    },
+    [filter, viewMode, calYear, calMonth, fetch],
+  );
+
+  const handleViewModeToggle = useCallback(() => {
+    const next: ViewMode = viewMode === 'list' ? 'calendar' : 'list';
+    setViewMode(next);
+    const params = filterToParams(filter);
+    if (next === 'calendar') {
+      const { from, to } = getMonthRange(calYear, calMonth);
+      fetch({ ...params, p_from: from, p_to: to });
+    } else {
+      fetch(params);
+    }
+  }, [viewMode, filter, calYear, calMonth, fetch]);
+
+  const handlePrevMonth = useCallback(() => {
+    if (calMonth === 1) {
+      setCalYear((y) => y - 1);
+      setCalMonth(12);
+    } else {
+      setCalMonth((m) => m - 1);
+    }
+  }, [calMonth]);
+
+  const handleNextMonth = useCallback(() => {
+    if (calMonth === 12) {
+      setCalYear((y) => y + 1);
+      setCalMonth(1);
+    } else {
+      setCalMonth((m) => m + 1);
+    }
+  }, [calMonth]);
+
+  const handleDayPress = useCallback(
+    (date: string) => {
+      // 해당 날의 메모가 있으면 리스트 뷰로 전환 후 해당 날짜 필터
+      const summary = calendarSummary.get(date);
+      if (summary && summary.memoIds.length > 0) {
+        setViewMode('list');
+        // 날짜 기반 필터는 서버 파라미터로 처리
+        fetch({ ...filterToParams(filter), p_from: date, p_to: date });
+      }
+    },
+    [calendarSummary, filter, fetch],
+  );
+
+  const handleMemoPress = useCallback(
+    (memo: MemoItem) => {
+      onMemoPress(memo.id);
+    },
+    [onMemoPress],
+  );
+
+  const handleStockSelect = useCallback(
+    (stock: Stock) => {
+      handleFilterChange({ stockId: stock.id, stockName: stock.name });
+    },
+    [handleFilterChange],
+  );
+
+  const renderMemoItem = useCallback(
+    ({ item }: { item: MemoItem }) => (
+      <MemoCard memo={item} onPress={handleMemoPress} />
+    ),
+    [handleMemoPress],
+  );
+
+  const renderFooter = useCallback(() => {
+    if (!loadingMore) return null;
+    return (
+      <View style={styles.loadMoreIndicator}>
+        <ActivityIndicator size="small" color="#003ec7" />
+      </View>
+    );
+  }, [loadingMore]);
+
+  const renderEmpty = useCallback(() => {
+    if (initialLoading) return null;
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>메모가 없습니다</Text>
+        <Text style={styles.emptySubText}>우하단 + 버튼을 눌러 메모를 작성하세요</Text>
+      </View>
+    );
+  }, [initialLoading]);
+
+  // ── 초기 로딩 ──
+  if (initialLoading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#003ec7" />
+        <Text style={styles.loadingText}>메모 불러오는 중...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      {/* 헤더 */}
+      <View style={styles.topBar}>
+        <Text style={styles.title}>투자 일지</Text>
+        <TouchableOpacity style={styles.viewToggleBtn} onPress={handleViewModeToggle}>
+          <Text style={styles.viewToggleText}>
+            {viewMode === 'list' ? '달력형' : '리스트형'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 필터 */}
+      <MemoFilter
+        filter={filter}
+        sectors={sectors}
+        onFilterChange={handleFilterChange}
+        onStockPickerOpen={() => setStockPickerVisible(true)}
+      />
+
+      {/* 에러 배너 */}
+      {error && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>{error}</Text>
+          <TouchableOpacity onPress={refresh}>
+            <Text style={styles.errorBannerRetry}>다시 시도</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* 달력형 뷰 */}
+      {viewMode === 'calendar' && (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.calendarScrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#003ec7" />
+          }
+        >
+          <CalendarView
+            year={calYear}
+            month={calMonth}
+            calendarSummary={calendarSummary}
+            onDayPress={handleDayPress}
+            onPrevMonth={handlePrevMonth}
+            onNextMonth={handleNextMonth}
+          />
+          <View style={styles.fabSpacer} />
+        </ScrollView>
+      )}
+
+      {/* 리스트형 뷰 */}
+      {viewMode === 'list' && (
+        <FlatList
+          data={allMemos}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMemoItem}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#003ec7" />
+          }
+          ListEmptyComponent={renderEmpty}
+          ListFooterComponent={renderFooter}
+          onEndReached={hasMore ? loadMore : undefined}
+          onEndReachedThreshold={0.3}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+        />
+      )}
+
+      {/* FAB */}
+      <TouchableOpacity style={styles.fab} onPress={onAddMemo} activeOpacity={0.85}>
+        <Text style={styles.fabIcon}>+</Text>
+      </TouchableOpacity>
+
+      {/* 종목 검색 모달 */}
+      <StockPickerModal
+        visible={stockPickerVisible}
+        onClose={() => setStockPickerVisible(false)}
+        onSelect={handleStockSelect}
+      />
+    </SafeAreaView>
+  );
+}
+
+// ────────────────────────────────────────────
+// 스타일
+// ────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: '#f8f9ff',
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#f8f9ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#434656',
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#0b1c30',
+  },
+  viewToggleBtn: {
+    backgroundColor: '#dce9ff',
+    borderRadius: 9999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  viewToggleText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#003ec7',
+  },
+  errorBanner: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    backgroundColor: '#ffdad6',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  errorBannerText: {
+    fontSize: 13,
+    color: '#93000a',
+    flex: 1,
+  },
+  errorBannerRetry: {
+    fontSize: 13,
+    color: '#ba1a1a',
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  scroll: {
+    flex: 1,
+  },
+  calendarScrollContent: {
+    padding: 16,
+    gap: 16,
+  },
+  listContent: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+  separator: {
+    height: 10,
+  },
+  emptyContainer: {
+    paddingTop: 60,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#434656',
+  },
+  emptySubText: {
+    fontSize: 13,
+    color: '#737688',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  loadMoreIndicator: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  fabSpacer: {
+    height: 80,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 32,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#003ec7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#003ec7',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  fabIcon: {
+    fontSize: 28,
+    color: '#ffffff',
+    fontWeight: '300',
+    lineHeight: 32,
+  },
+});

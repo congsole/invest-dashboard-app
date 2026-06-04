@@ -5,7 +5,7 @@ import * as Linking from 'expo-linking';
 import { useAuth } from './hooks/useAuth';
 import { AuthScreen } from './screens/AuthScreen';
 import { EmailVerificationScreen } from './screens/EmailVerificationScreen';
-import { DashboardScreen } from './screens/DashboardScreen';
+import { MainScreen } from './screens/MainScreen';
 import { supabase } from './utils/supabase';
 
 export default function App() {
@@ -63,11 +63,11 @@ export default function App() {
     );
   }
 
-  // 인증된 사용자 → 대시보드 메인 화면
+  // 인증된 사용자 → 메인 화면 (대시보드 + 투자 일지 탭)
   if (user) {
     return (
       <>
-        <DashboardScreen />
+        <MainScreen />
         <StatusBar style="auto" />
       </>
     );

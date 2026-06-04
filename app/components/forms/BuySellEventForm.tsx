@@ -13,6 +13,7 @@ import { BuySellEventInput } from '../../types/accountEvent';
 
 type BuySellAssetType = 'korean_stock' | 'us_stock' | 'crypto';
 import { createAccountEvent } from '../../services/accountEvents';
+import { createTradeEventWithMemo } from '../../services/memo';
 
 // ────────────────────────────────────────────
 // 상수
@@ -62,6 +63,11 @@ export function BuySellEventForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // ── 메모 작성 옵션 ──
+  const [memoEnabled, setMemoEnabled] = useState(false);
+  const [memoBody, setMemoBody] = useState('');
+  const [goalPrice, setGoalPrice] = useState('');
+
   // 통화 결정: 한국주식=KRW, 미국주식=USD, 코인=코인티커(직접 입력)
   const currency =
     assetType === 'korean_stock'
@@ -107,6 +113,9 @@ export function BuySellEventForm({
     setSettlementManual(false);
     setSettlementOverride('');
     setError('');
+    setMemoEnabled(false);
+    setMemoBody('');
+    setGoalPrice('');
   }, []);
 
   const handleSubmit = async () => {
@@ -124,7 +133,13 @@ export function BuySellEventForm({
     const price = parseFloat(pricePerUnit);
     if (isNaN(price) || price < 0) { setError('유효한 체결가를 입력해주세요'); return; }
 
-    const input: BuySellEventInput = {
+    // 메모 활성화 시 본문 검증
+    if (memoEnabled && !memoBody.trim()) {
+      setError('메모 내용을 입력하거나 메모 작성을 해제하세요');
+      return;
+    }
+
+    const eventPayload = {
       event_type: eventType,
       event_date: eventDate,
       asset_type: assetType,
@@ -137,12 +152,23 @@ export function BuySellEventForm({
       fee_currency: feeCurrency,
       tax: parseFloat(tax) || 0,
       amount: effectiveSettlement,
-      source: 'manual',
+      source: 'manual' as const,
     };
 
     setLoading(true);
     try {
-      await createAccountEvent(input);
+      if (memoEnabled && memoBody.trim()) {
+        // 매매이벤트 + 메모 동시 생성 (create_trade_event_with_memo RPC)
+        await createTradeEventWithMemo({
+          p_event: eventPayload,
+          p_memo_body: memoBody.trim(),
+          p_goal_price: goalPrice ? parseFloat(goalPrice) : null,
+        });
+      } else {
+        // 기존 방식: 계정 이벤트만 등록
+        const input: BuySellEventInput = eventPayload;
+        await createAccountEvent(input);
+      }
       resetForm();
       onSuccess();
     } catch (e) {
@@ -363,6 +389,51 @@ export function BuySellEventForm({
         )}
       </View>
 
+      {/* 메모 작성 옵션 */}
+      <View style={styles.field}>
+        <TouchableOpacity
+          style={styles.memoToggleRow}
+          onPress={() => setMemoEnabled((v) => !v)}
+          activeOpacity={0.8}
+        >
+          <View>
+            <Text style={styles.label}>메모 작성</Text>
+            <Text style={styles.memoToggleDesc}>
+              {memoEnabled ? '메모를 함께 저장합니다' : '탭하여 메모 작성 추가'}
+            </Text>
+          </View>
+          <View style={[styles.memoToggle, memoEnabled && styles.memoToggleOn]}>
+            <View style={[styles.memoToggleKnob, memoEnabled && styles.memoToggleKnobOn]} />
+          </View>
+        </TouchableOpacity>
+
+        {memoEnabled && (
+          <View style={styles.memoFields}>
+            <TextInput
+              style={styles.memoInput}
+              placeholder="매수/매도 이유, 목표 등을 기록하세요..."
+              placeholderTextColor="#737688"
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+              value={memoBody}
+              onChangeText={setMemoBody}
+            />
+            <View style={styles.goalPriceRow}>
+              <Text style={styles.label}>목표가 (선택)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="목표가 입력"
+                placeholderTextColor="#737688"
+                keyboardType="decimal-pad"
+                value={goalPrice}
+                onChangeText={setGoalPrice}
+              />
+            </View>
+          </View>
+        )}
+      </View>
+
       {/* 에러 */}
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -548,5 +619,55 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  // ── 메모 작성 옵션 ──
+  memoToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#eff4ff',
+    borderRadius: 12,
+    padding: 14,
+  },
+  memoToggleDesc: {
+    fontSize: 11,
+    color: '#737688',
+    marginTop: 2,
+  },
+  memoToggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#c3c5d9',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  memoToggleOn: {
+    backgroundColor: '#22C55E',
+  },
+  memoToggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+  },
+  memoToggleKnobOn: {
+    alignSelf: 'flex-end',
+  },
+  memoFields: {
+    gap: 10,
+    marginTop: 6,
+  },
+  memoInput: {
+    backgroundColor: '#dce9ff',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 14,
+    color: '#0b1c30',
+    minHeight: 100,
+    lineHeight: 20,
+  },
+  goalPriceRow: {
+    gap: 6,
   },
 });
