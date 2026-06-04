@@ -137,11 +137,10 @@ export interface UpdateMemoInput {
 export interface ListMemosParams {
   p_from?: string | null;
   p_to?: string | null;
-  p_stock_id?: string | null;
-  p_include_trade_events?: boolean;
+  p_stock_ids?: string[] | null;
   p_trade_events_only?: boolean;
   p_news_only?: boolean;
-  p_sector_id?: number | null;
+  p_sector_ids?: number[] | null;
   p_no_links?: boolean;
   p_limit?: number;
   p_offset?: number;
@@ -158,26 +157,29 @@ export interface DayMemoSummary {
 }
 
 // ── 필터 상태 ──
+// stockIds: 복수 선택 가능 (OR 필터)
+// stockNames: stockIds에 대응하는 표시용 이름 배열
+// sectorIds: 복수 선택 가능 (OR 필터)
+// sectorNames: sectorIds에 대응하는 표시용 이름 배열
+// noLinks: true 시 다른 엔티티 필터 무시 (상호 배타적)
 
 export interface MemoFilterState {
-  stockId: string | null;
-  stockName: string | null;
-  includeTradeEvents: boolean;
+  stockIds: string[];
+  stockNames: string[];
   tradeEventsOnly: boolean;
   newsOnly: boolean;
-  sectorId: number | null;
-  sectorName: string | null;
+  sectorIds: number[];
+  sectorNames: string[];
   noLinks: boolean;
 }
 
 export const DEFAULT_FILTER_STATE: MemoFilterState = {
-  stockId: null,
-  stockName: null,
-  includeTradeEvents: true,
+  stockIds: [],
+  stockNames: [],
   tradeEventsOnly: false,
   newsOnly: false,
-  sectorId: null,
-  sectorName: null,
+  sectorIds: [],
+  sectorNames: [],
   noLinks: false,
 };
 

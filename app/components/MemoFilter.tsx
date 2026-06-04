@@ -1,12 +1,16 @@
 /**
  * MemoFilter.tsx — 메모 필터 컴포넌트
  *
- * 필터 조건 (AND 결합):
- *   - 종목별 (stockId) + "직접 연결만" 토글
- *   - 매매이벤트 연관만 (tradeEventsOnly)
- *   - 뉴스 연관만 (newsOnly)
- *   - 섹터별 (sectorId)
- *   - 연결 없음 (noLinks)
+ * 필터 결합 규칙 (이슈 014):
+ *   - 같은 타입 내 복수 선택 → OR (종목, 섹터)
+ *   - 타입 간 → AND
+ *   - "연결 없음"(noLinks) 선택 시 다른 필터 자동 해제 (상호 배타적)
+ *
+ * 변경 사항 (이슈 014):
+ *   - "직접 연결만 보기" 토글 제거
+ *   - 종목 필터 복수 선택 지원
+ *   - 섹터 필터 복수 선택 지원
+ *   - "매매이벤트 연관" → "매매 연관" 필터명 변경
  */
 
 import React, { useCallback } from 'react';
@@ -61,7 +65,7 @@ const FilterChip = React.memo(function FilterChip({
 interface SectorFilterChipProps {
   sector: Sector;
   active: boolean;
-  onToggle: (sectorId: number, sectorName: string) => void;
+  onToggle: (sectorId: number) => void;
 }
 
 const SectorFilterChip = React.memo(function SectorFilterChip({
@@ -70,8 +74,8 @@ const SectorFilterChip = React.memo(function SectorFilterChip({
   onToggle,
 }: SectorFilterChipProps) {
   const handlePress = useCallback(
-    () => onToggle(sector.id, sector.name),
-    [sector.id, sector.name, onToggle],
+    () => onToggle(sector.id),
+    [sector.id, onToggle],
   );
   return (
     <FilterChip
@@ -80,6 +84,36 @@ const SectorFilterChip = React.memo(function SectorFilterChip({
       color={ENTITY_COLORS.sector}
       onPress={handlePress}
     />
+  );
+});
+
+// ── 선택된 종목 칩 (stockId 캡처, onRemove 안정화) ──
+
+interface SelectedStockChipProps {
+  stockId: string;
+  stockName: string;
+  onRemove: (stockId: string) => void;
+}
+
+const SelectedStockChip = React.memo(function SelectedStockChip({
+  stockId,
+  stockName,
+  onRemove,
+}: SelectedStockChipProps) {
+  const handlePress = useCallback(
+    () => onRemove(stockId),
+    [stockId, onRemove],
+  );
+  return (
+    <TouchableOpacity
+      style={[styles.chip, { backgroundColor: ENTITY_COLORS.stock, borderColor: ENTITY_COLORS.stock }]}
+      onPress={handlePress}
+      activeOpacity={0.8}
+    >
+      <Text style={[styles.chipText, styles.chipTextActive]}>
+        {stockName} ✕
+      </Text>
+    </TouchableOpacity>
   );
 });
 
@@ -98,48 +132,72 @@ export const MemoFilter = React.memo(function MemoFilter({
   }, [filter.newsOnly, onFilterChange]);
 
   const handleToggleNoLinks = useCallback(() => {
-    onFilterChange({
-      noLinks: !filter.noLinks,
-      tradeEventsOnly: false,
-      newsOnly: false,
-    });
+    // "연결 없음" 선택 시 다른 모든 필터 해제
+    if (!filter.noLinks) {
+      onFilterChange({
+        noLinks: true,
+        stockIds: [],
+        stockNames: [],
+        tradeEventsOnly: false,
+        newsOnly: false,
+        sectorIds: [],
+        sectorNames: [],
+      });
+    } else {
+      onFilterChange({ noLinks: false });
+    }
   }, [filter.noLinks, onFilterChange]);
 
+  // 섹터 복수 선택 토글
   const handleToggleSector = useCallback(
-    (sectorId: number, sectorName: string) => {
-      if (filter.sectorId === sectorId) {
-        onFilterChange({ sectorId: null, sectorName: null });
+    (sectorId: number) => {
+      const currentIds = filter.sectorIds;
+      const currentNames = filter.sectorNames;
+      const idx = currentIds.indexOf(sectorId);
+
+      if (idx >= 0) {
+        // 이미 선택된 섹터 → 해제
+        const newIds = currentIds.filter((id) => id !== sectorId);
+        const newNames = currentNames.filter((_, i) => i !== idx);
+        onFilterChange({ sectorIds: newIds, sectorNames: newNames });
       } else {
-        onFilterChange({ sectorId, sectorName, noLinks: false });
+        // 새 섹터 추가 — noLinks 해제
+        const sector = sectors.find((s) => s.id === sectorId);
+        const newIds = [...currentIds, sectorId];
+        const newNames = [...currentNames, sector?.name ?? ''];
+        onFilterChange({ sectorIds: newIds, sectorNames: newNames, noLinks: false });
       }
     },
-    [filter.sectorId, onFilterChange],
+    [filter.sectorIds, filter.sectorNames, sectors, onFilterChange],
   );
 
-  const handleClearStock = useCallback(() => {
-    onFilterChange({ stockId: null, stockName: null });
-  }, [onFilterChange]);
-
-  const handleToggleIncludeTradeEvents = useCallback(() => {
-    onFilterChange({ includeTradeEvents: !filter.includeTradeEvents });
-  }, [filter.includeTradeEvents, onFilterChange]);
+  // 선택된 종목 개별 해제
+  const handleRemoveStock = useCallback(
+    (stockId: string) => {
+      const idx = filter.stockIds.indexOf(stockId);
+      if (idx < 0) return;
+      const newIds = filter.stockIds.filter((id) => id !== stockId);
+      const newNames = filter.stockNames.filter((_, i) => i !== idx);
+      onFilterChange({ stockIds: newIds, stockNames: newNames });
+    },
+    [filter.stockIds, filter.stockNames, onFilterChange],
+  );
 
   const hasAnyFilter =
-    filter.stockId !== null ||
+    filter.stockIds.length > 0 ||
     filter.tradeEventsOnly ||
     filter.newsOnly ||
-    filter.sectorId !== null ||
+    filter.sectorIds.length > 0 ||
     filter.noLinks;
 
   const handleClearAll = useCallback(() => {
     onFilterChange({
-      stockId: null,
-      stockName: null,
-      includeTradeEvents: true,
+      stockIds: [],
+      stockNames: [],
       tradeEventsOnly: false,
       newsOnly: false,
-      sectorId: null,
-      sectorName: null,
+      sectorIds: [],
+      sectorNames: [],
       noLinks: false,
     });
   }, [onFilterChange]);
@@ -151,28 +209,28 @@ export const MemoFilter = React.memo(function MemoFilter({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* 종목 필터 */}
+        {/* 선택된 종목 칩 (복수) */}
+        {filter.stockIds.map((stockId, idx) => (
+          <SelectedStockChip
+            key={stockId}
+            stockId={stockId}
+            stockName={filter.stockNames[idx] ?? stockId}
+            onRemove={handleRemoveStock}
+          />
+        ))}
+
+        {/* 종목 추가 버튼 */}
         <TouchableOpacity
-          style={[
-            styles.chip,
-            filter.stockId
-              ? { backgroundColor: ENTITY_COLORS.stock, borderColor: ENTITY_COLORS.stock }
-              : styles.chipInactive,
-          ]}
-          onPress={filter.stockId ? handleClearStock : onStockPickerOpen}
+          style={[styles.chip, styles.chipInactive]}
+          onPress={onStockPickerOpen}
           activeOpacity={0.8}
         >
-          <Text
-            style={[
-              styles.chipText,
-              filter.stockId ? styles.chipTextActive : styles.chipTextInactive,
-            ]}
-          >
-            {filter.stockId ? `종목: ${filter.stockName}` : '종목 필터'}
+          <Text style={[styles.chipText, styles.chipTextInactive]}>
+            {filter.stockIds.length > 0 ? '+ 종목 추가' : '종목 필터'}
           </Text>
         </TouchableOpacity>
 
-        {/* 매매이벤트 연관 */}
+        {/* 매매 연관 (이슈 014: "매매이벤트 연관" → "매매 연관") */}
         <FilterChip
           label="매매 연관"
           active={filter.tradeEventsOnly}
@@ -188,12 +246,12 @@ export const MemoFilter = React.memo(function MemoFilter({
           onPress={handleToggleNews}
         />
 
-        {/* 섹터별 */}
+        {/* 섹터별 (복수 선택 가능) */}
         {sectors.map((sec) => (
           <SectorFilterChip
             key={sec.id}
             sector={sec}
-            active={filter.sectorId === sec.id}
+            active={filter.sectorIds.includes(sec.id)}
             onToggle={handleToggleSector}
           />
         ))}
@@ -213,27 +271,6 @@ export const MemoFilter = React.memo(function MemoFilter({
           </TouchableOpacity>
         )}
       </ScrollView>
-
-      {/* 종목 필터 시: "직접 연결만" 토글 */}
-      {filter.stockId && (
-        <TouchableOpacity
-          style={styles.subToggleRow}
-          onPress={handleToggleIncludeTradeEvents}
-          activeOpacity={0.8}
-        >
-          <View
-            style={[
-              styles.toggle,
-              filter.includeTradeEvents ? styles.toggleOn : styles.toggleOff,
-            ]}
-          >
-            <View style={[styles.toggleKnob, filter.includeTradeEvents && styles.toggleKnobOn]} />
-          </View>
-          <Text style={styles.subToggleText}>
-            {filter.includeTradeEvents ? '매매이벤트 포함' : '직접 연결만'}
-          </Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 });
@@ -278,38 +315,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#ba1a1a',
-  },
-  subToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 20,
-  },
-  toggle: {
-    width: 36,
-    height: 20,
-    borderRadius: 10,
-    padding: 2,
-    justifyContent: 'center',
-  },
-  toggleOn: {
-    backgroundColor: '#3B82F6',
-  },
-  toggleOff: {
-    backgroundColor: '#c3c5d9',
-  },
-  toggleKnob: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#ffffff',
-  },
-  toggleKnobOn: {
-    alignSelf: 'flex-end',
-  },
-  subToggleText: {
-    fontSize: 12,
-    color: '#434656',
-    fontWeight: '500',
   },
 });

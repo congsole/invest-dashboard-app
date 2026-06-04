@@ -6,7 +6,7 @@
  * - 렌더링 최적화: initialLoading(초기), refreshing(당김 새로고침) 분리
  */
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,6 @@ import {
   SafeAreaView,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Modal,
   TextInput,
   ScrollView,
@@ -55,11 +54,10 @@ function getMonthRange(year: number, month: number): { from: string; to: string 
 
 function filterToParams(filter: MemoFilterState): ListMemosParams {
   return {
-    p_stock_id: filter.stockId ?? null,
-    p_include_trade_events: filter.includeTradeEvents,
+    p_stock_ids: filter.stockIds.length > 0 ? filter.stockIds : null,
     p_trade_events_only: filter.tradeEventsOnly,
     p_news_only: filter.newsOnly,
-    p_sector_id: filter.sectorId ?? null,
+    p_sector_ids: filter.sectorIds.length > 0 ? filter.sectorIds : null,
     p_no_links: filter.noLinks,
   };
 }
@@ -217,6 +215,10 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
 
   const { allMemos, calendarSummary, initialLoading, refreshing, loadingMore, error, fetch, refresh, loadMore, hasMore } = useMemos();
 
+  // filter 최신값을 ref로 추적 (handleFilterChange 의존성 최소화)
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
+
   // 초기 로드
   useEffect(() => {
     fetch(filterToParams(filter));
@@ -228,14 +230,14 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
   useEffect(() => {
     if (viewMode === 'calendar') {
       const { from, to } = getMonthRange(calYear, calMonth);
-      fetch({ ...filterToParams(filter), p_from: from, p_to: to });
+      fetch({ ...filterToParams(filterRef.current), p_from: from, p_to: to });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calYear, calMonth, viewMode, fetch]);
 
   const handleFilterChange = useCallback(
     (updated: Partial<MemoFilterState>) => {
-      const newFilter = { ...filter, ...updated };
+      const newFilter = { ...filterRef.current, ...updated };
       setFilter(newFilter);
       const params = filterToParams(newFilter);
       if (viewMode === 'calendar') {
@@ -245,20 +247,20 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
         fetch(params);
       }
     },
-    [filter, viewMode, calYear, calMonth, fetch],
+    [viewMode, calYear, calMonth, fetch],
   );
 
   const handleViewModeToggle = useCallback(() => {
     const next: ViewMode = viewMode === 'list' ? 'calendar' : 'list';
     setViewMode(next);
-    const params = filterToParams(filter);
+    const params = filterToParams(filterRef.current);
     if (next === 'calendar') {
       const { from, to } = getMonthRange(calYear, calMonth);
       fetch({ ...params, p_from: from, p_to: to });
     } else {
       fetch(params);
     }
-  }, [viewMode, filter, calYear, calMonth, fetch]);
+  }, [viewMode, calYear, calMonth, fetch]);
 
   const handlePrevMonth = useCallback(() => {
     if (calMonth === 1) {
@@ -285,10 +287,10 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
       if (summary && summary.memoIds.length > 0) {
         setViewMode('list');
         // 날짜 기반 필터는 서버 파라미터로 처리
-        fetch({ ...filterToParams(filter), p_from: date, p_to: date });
+        fetch({ ...filterToParams(filterRef.current), p_from: date, p_to: date });
       }
     },
-    [calendarSummary, filter, fetch],
+    [calendarSummary, fetch],
   );
 
   const handleMemoPress = useCallback(
@@ -300,7 +302,12 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
 
   const handleStockSelect = useCallback(
     (stock: Stock) => {
-      handleFilterChange({ stockId: stock.id, stockName: stock.name });
+      const current = filterRef.current;
+      // 이미 선택된 종목이면 무시 (중복 추가 방지)
+      if (current.stockIds.includes(stock.id)) return;
+      const newIds = [...current.stockIds, stock.id];
+      const newNames = [...current.stockNames, stock.name];
+      handleFilterChange({ stockIds: newIds, stockNames: newNames, noLinks: false });
     },
     [handleFilterChange],
   );
@@ -331,8 +338,8 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
     );
   }, [initialLoading]);
 
-  // ── 초기 로딩 ──
-  if (initialLoading) {
+  // ── 초기 로딩 (데이터가 한 번도 없는 최초 마운트 시에만 전체 화면 스피너) ──
+  if (initialLoading && allMemos.length === 0) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#003ec7" />
