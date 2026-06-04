@@ -74,11 +74,10 @@ export async function listMemos(
   const { data, error } = await supabase.rpc('list_memos', {
     p_from: params.p_from ?? null,
     p_to: params.p_to ?? null,
-    p_stock_id: params.p_stock_id ?? null,
-    p_include_trade_events: params.p_include_trade_events ?? true,
+    p_stock_ids: params.p_stock_ids ?? null,
     p_trade_events_only: params.p_trade_events_only ?? false,
     p_news_only: params.p_news_only ?? false,
-    p_sector_id: params.p_sector_id ?? null,
+    p_sector_ids: params.p_sector_ids ?? null,
     p_no_links: params.p_no_links ?? false,
     p_limit: params.p_limit ?? 20,
     p_offset: params.p_offset ?? 0,

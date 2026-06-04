@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: 78dfc50 — 2026-06-02*
+*최종 업데이트: 6aab87b — 2026-06-04*
 
 ## 테이블
 
@@ -350,3 +350,5 @@ memo_sectors }o--|| sectors : "N:1 (sector_id FK, cascade)"
 | [005] 소셜 로그인 추가 (7ab2e6f) | auth.identities 참조 섹션 추가 (Supabase 자동 관리, DDL 불필요). profiles 테이블 설명 보강 (소셜 로그인 시 생성 조건 및 닉네임 자동 설정 로직). ERD에 auth.users → auth.identities 관계 추가. |
 | [006] 메모/투자 일지 (7b4d051) | sectors 테이블 추가 (GICS 11 + 가상자산 12개 고정 시드). stocks 테이블 추가 (sector_id FK 포함, ticker+asset_type unique). kr_sector_map 테이블 추가 (네이버 업종 → GICS 매핑 시드). memos 테이블 추가. memo_stocks junction 테이블 추가 (goal_price 포함). memo_trade_events junction 테이블 추가. memo_news junction 테이블 추가. memo_sectors junction 테이블 추가. ERD 관계 9건 추가. |
 | [006] 종목 검색 기능 (78dfc50) | stocks 테이블 수정: `asset_type` 컬럼 제거, `market`(KR/US/CRYPTO) · `currency` · `is_active` 컬럼 추가. UNIQUE 제약 `(ticker, asset_type)` → `(ticker, market)` 변경. 인덱스 `idx_stocks_ticker_asset_type` → `idx_stocks_ticker_market` 변경, `idx_stocks_name` 추가. RLS 쓰기 정책 변경: 본인 직접 허용 → service_role 전용 (FastAPI 서버 경유 upsert). |
+| [006] 메모 필터 기능 수정 (11f2f4c) | DB 스키마 변경 없음. 필터 UX 동작 규칙 변경(필터 항목명 "매매이벤트 연관" → "매매 연관", 종목 필터 "직접 연결만 보기" 토글 제거, 같은 타입 내 OR · 타입 간 AND 결합 명확화, "연결 없음" 필터의 다른 필터와 상호 배타적 동작)은 앱 레이어에만 영향. |
+| [006] 메모 필터 UI 수정 (6aab87b) | DB 스키마 변경 없음. 필터 UI 레이아웃 변경(단일 목록 → 세 줄 구조: 토글 행 / 종목 행 / 섹터 행, "연결 없음"의 토글 행 이동, 결합 규칙 표현 변경)은 앱 레이어에만 영향. |
