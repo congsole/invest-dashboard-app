@@ -15,7 +15,8 @@
       "Bash(claude -p \"say hello in one word\" --output-format stream-json --verbose)",
       "Bash(ps -p 44138 -o pid,etime,rss,state)",
       "Bash(ps -p 44136 -o pid,etime,rss,state)",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(npx supabase:*)"
     ]
   }
 }
