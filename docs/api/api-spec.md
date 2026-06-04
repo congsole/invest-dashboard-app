@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 78dfc50 — 2026-06-02*
+*최종 업데이트: 11f2f4c — 2026-06-04*
 
 ## 공통
 
@@ -1201,12 +1201,17 @@ ticker + market 조합으로 종목 단건을 조회한다.
 
 ### 메모 목록 조회 (필터 지원) (RPC)
 
-최신순(`created_at desc`)으로 메모 목록을 조회한다. 달력형과 리스트형 모두 이 API를 사용하며, 달력형은 날짜 범위(`from`/`to`)를 지정하고 리스트형은 필터 조건을 조합한다. 필터 조건은 AND로 결합된다.
+최신순(`created_at desc`)으로 메모 목록을 조회한다. 달력형과 리스트형 모두 이 API를 사용하며, 달력형은 날짜 범위(`from`/`to`)를 지정하고 리스트형은 필터 조건을 조합한다.
 
-종목 필터 시: 해당 종목에 직접 연결된 메모와, 해당 종목의 매매이벤트에 연결된 메모를 함께 반환한다(`include_trade_events: true` 기본값). `include_trade_events: false`이면 직접 연결된 메모만 반환한다.
+**필터 결합 규칙**
+- **같은 타입 내 복수 선택 → OR**: `p_stock_ids`에 여러 종목 지정 시 둘 중 하나라도 연관된 메모를 모두 반환. `p_sector_ids`도 동일.
+- **다른 타입 간 → AND**: 종목 필터 + 매매 연관 필터 동시 지정 시 "해당 종목 관련 메모 중 매매이벤트도 연결된 것"만 반환.
+- **연결 없음(`p_no_links`) 필터는 다른 필터와 상호 배타적**: `p_no_links: true` 지정 시 다른 모든 엔티티 필터를 무시하고 연결 없는 메모만 반환.
+
+종목 필터 시: 해당 종목에 직접 연결된 메모(`memo_stocks`)와 해당 종목의 매매이벤트에 연결된 메모(`memo_trade_events`)를 항상 함께 반환한다. "직접 연결만 보기" 토글은 제공하지 않으며, 종목 + 매매 연관 필터를 AND 결합하면 "매매이벤트에도 연결된 종목 관련 메모"만 조회할 수 있다.
 
 - **방식**: RPC (DB Function)
-- **호출**: `supabase.rpc('list_memos', { p_from, p_to, p_stock_id, p_include_trade_events, p_trade_events_only, p_news_only, p_sector_id, p_no_links, p_limit, p_offset })`
+- **호출**: `supabase.rpc('list_memos', { p_from, p_to, p_stock_ids, p_trade_events_only, p_news_only, p_sector_ids, p_no_links, p_limit, p_offset })`
 - **인증**: 필요
 
 **요청 파라미터**
@@ -1214,12 +1219,11 @@ ticker + market 조합으로 종목 단건을 조회한다.
 |---------|------|------|------|
 | p_from | string (date) \| null | N | 조회 시작일 (YYYY-MM-DD). 달력형에서 월 첫날. |
 | p_to | string (date) \| null | N | 조회 종료일 (YYYY-MM-DD). 달력형에서 월 마지막날. |
-| p_stock_id | string (uuid) \| null | N | 종목 필터. 해당 종목에 연결된 메모만 반환. |
-| p_include_trade_events | boolean | N | 종목 필터 시 해당 종목의 매매이벤트 연결 메모 포함 여부 (기본 true). p_stock_id가 null이면 무시. |
-| p_trade_events_only | boolean | N | true이면 매매이벤트 연결 메모만 반환 (기본 false). |
-| p_news_only | boolean | N | true이면 뉴스 연결 메모만 반환 (기본 false). |
-| p_sector_id | number \| null | N | 섹터 필터. 해당 섹터에 연결된 메모만 반환. |
-| p_no_links | boolean | N | true이면 어떤 엔티티에도 연결되지 않은 메모만 반환 (기본 false). |
+| p_stock_ids | string[] (uuid) \| null | N | 종목 필터. 지정된 종목들 중 하나라도 연관된 메모 반환 (OR). 직접 연결 및 매매이벤트 경유 연결 모두 포함. |
+| p_trade_events_only | boolean | N | true이면 매매이벤트에 연결된 메모만 반환 (기본 false). 다른 필터와 AND 결합. |
+| p_news_only | boolean | N | true이면 뉴스에 연결된 메모만 반환 (기본 false). 다른 필터와 AND 결합. |
+| p_sector_ids | number[] \| null | N | 섹터 필터. 지정된 섹터들 중 하나라도 연관된 메모 반환 (OR). 다른 타입 필터와 AND 결합. |
+| p_no_links | boolean | N | true이면 어떤 엔티티에도 연결되지 않은 메모만 반환 (기본 false). true 지정 시 다른 엔티티 필터는 무시. |
 | p_limit | number | N | 페이지 크기 (기본 20, 최대 100). |
 | p_offset | number | N | 페이지 오프셋 (기본 0). |
 
@@ -1580,3 +1584,4 @@ null  // 삭제 성공 시 데이터 없음
 | [005] 소셜 로그인 추가 (7ab2e6f) | Auth — Google 소셜 로그인(signInWithOAuth google) 신규 추가. Apple 소셜 로그인(signInWithOAuth apple) 신규 추가. createProfile 설명 보강 (소셜 로그인 첫 로그인 시 호출 조건, provider display name 자동 추출 로직). onAuthStateChange 이벤트 표 수정 (SIGNED_IN 항목에 소셜 로그인 완료 케이스 추가) 및 소셜 로그인 후 프로필 자동 생성 패턴 코드 예시 추가. |
 | [006] 메모/투자 일지 (7b4d051) | Sector 도메인 신규 추가 (섹터 목록 조회). Stock 도메인 신규 추가 (단건 조회, 등록+섹터자동추천 RPC, 섹터 수동 지정). Memo 도메인 신규 추가 (생성 RPC, 목록 조회 RPC, 상세 조회, 수정 RPC, 삭제, 엔티티 연결 추가 4종, 엔티티 연결 해제 4종, 매매이벤트+메모 동시 생성 RPC). |
 | [006] 종목 검색 기능 (78dfc50) | Stock — 로컬 종목 검색 API 신규 추가 (stocks 테이블 ilike 검색, market 필터 지원). 종목 조회(단건) 파라미터 `asset_type` → `market`('KR'/'US'/'CRYPTO')으로 변경, 응답에 `currency`, `is_active` 추가. 종목 등록+섹터자동추천 RPC 함수명 `upsert_stock_with_sector` → `get_or_recommend_stock_sector`로 변경, 파라미터 `p_asset_type` → `p_market` · `p_currency` 추가, 응답에 `market`/`currency`/`is_active` 반영. 종목 섹터 수동 지정/변경 방식 REST → FastAPI 경유(service_role)로 변경(stocks 쓰기는 service_role 전용 정책 반영). Memo 도메인 전체 응답의 stock 필드 `asset_type` → `market` 변경, memo_stocks join 응답에 `currency`/`is_active` 추가. |
+| [006] 메모 필터 기능 수정 (11f2f4c) | Memo — 메모 목록 조회(list_memos) RPC 변경: (1) `p_stock_id`(단건) → `p_stock_ids`(배열)로 변경하여 복수 종목 OR 필터 지원. (2) `p_include_trade_events` 파라미터 제거 — "직접 연결만 보기" 토글 폐지로 종목 필터는 직접 연결 + 매매이벤트 경유 연결을 항상 함께 반환. (3) `p_sector_id`(단건) → `p_sector_ids`(배열)로 변경하여 복수 섹터 OR 필터 지원. (4) RPC 호출 시그니처 업데이트. 필터 결합 규칙 설명 추가 (같은 타입 내 OR · 타입 간 AND · `p_no_links` 상호 배타적). |
