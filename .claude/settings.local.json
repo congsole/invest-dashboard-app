@@ -16,7 +16,12 @@
       "Bash(ps -p 44138 -o pid,etime,rss,state)",
       "Bash(ps -p 44136 -o pid,etime,rss,state)",
       "Bash(python3 -c ':*)",
-      "Bash(npx supabase:*)"
+정      "Bash(npx supabase:*)",
+      "Bash(python3 -c \"import pykrx; print\\('pykrx ok'\\)\")",
+      "Bash(python3 -c \"import httpx; print\\('httpx ok'\\)\")",
+      "Bash(python3 -c \"import supabase; print\\('supabase-py ok'\\)\")",
+      "Bash(pip3 install:*)",
+      "Bash(python3:*)"
     ]
   }
 }
