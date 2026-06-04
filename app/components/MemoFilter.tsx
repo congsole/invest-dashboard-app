@@ -1,16 +1,20 @@
 /**
  * MemoFilter.tsx — 메모 필터 컴포넌트
  *
- * 필터 결합 규칙 (이슈 014):
- *   - 같은 타입 내 복수 선택 → OR (종목, 섹터)
- *   - 타입 간 → AND
+ * 필터 결합 규칙 (이슈 015):
+ *   - 같은 행 내 복수 선택 → OR (종목, 섹터)
+ *   - 다른 행/타입 간 → AND
  *   - "연결 없음"(noLinks) 선택 시 다른 필터 자동 해제 (상호 배타적)
  *
- * 변경 사항 (이슈 014):
- *   - "직접 연결만 보기" 토글 제거
- *   - 종목 필터 복수 선택 지원
- *   - 섹터 필터 복수 선택 지원
- *   - "매매이벤트 연관" → "매매 연관" 필터명 변경
+ * 레이아웃 구조 (이슈 015):
+ *   1행 (토글 행): 매매 이벤트 / 뉴스 연관 / 연결 없음 토글
+ *   2행 (종목 행): "종목" 헤더 + 가로 스크롤 종목 칩
+ *   3행 (섹터 행): "섹터" 헤더 + 가로 스크롤 섹터 칩
+ *
+ * 변경 사항 (이슈 015):
+ *   - 단일 가로 스크롤 → 세 줄 구조로 재배치
+ *   - "매매 연관" → "매매 이벤트" 레이블 변경
+ *   - "연결 없음" 토글을 토글 행(1행)으로 이동
  */
 
 import React, { useCallback } from 'react';
@@ -21,8 +25,7 @@ import {
   ScrollView,
   StyleSheet,
 } from 'react-native';
-import { MemoFilterState, ENTITY_COLORS } from '../types/memo';
-import { Sector } from '../types/memo';
+import { MemoFilterState, ENTITY_COLORS, Sector } from '../types/memo';
 
 interface MemoFilterProps {
   filter: MemoFilterState;
@@ -204,85 +207,121 @@ export const MemoFilter = React.memo(function MemoFilter({
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* 선택된 종목 칩 (복수) */}
-        {filter.stockIds.map((stockId, idx) => (
-          <SelectedStockChip
-            key={stockId}
-            stockId={stockId}
-            stockName={filter.stockNames[idx] ?? stockId}
-            onRemove={handleRemoveStock}
-          />
-        ))}
-
-        {/* 종목 추가 버튼 */}
-        <TouchableOpacity
-          style={[styles.chip, styles.chipInactive]}
-          onPress={onStockPickerOpen}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.chipText, styles.chipTextInactive]}>
-            {filter.stockIds.length > 0 ? '+ 종목 추가' : '종목 필터'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* 매매 연관 (이슈 014: "매매이벤트 연관" → "매매 연관") */}
+      {/* 1행: 토글 행 — 매매 이벤트 / 뉴스 연관 / 연결 없음 */}
+      <View style={styles.toggleRow}>
         <FilterChip
-          label="매매 연관"
+          label="매매 이벤트"
           active={filter.tradeEventsOnly}
           color={ENTITY_COLORS.trade_event}
           onPress={handleToggleTradeEvents}
         />
-
-        {/* 뉴스 연관 */}
         <FilterChip
           label="뉴스 연관"
           active={filter.newsOnly}
           color={ENTITY_COLORS.news}
           onPress={handleToggleNews}
         />
-
-        {/* 섹터별 (복수 선택 가능) */}
-        {sectors.map((sec) => (
-          <SectorFilterChip
-            key={sec.id}
-            sector={sec}
-            active={filter.sectorIds.includes(sec.id)}
-            onToggle={handleToggleSector}
-          />
-        ))}
-
-        {/* 연결 없음 */}
         <FilterChip
           label="연결 없음"
           active={filter.noLinks}
           color={ENTITY_COLORS.none}
           onPress={handleToggleNoLinks}
         />
-
-        {/* 전체 초기화 */}
         {hasAnyFilter && (
           <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll}>
             <Text style={styles.clearBtnText}>초기화</Text>
           </TouchableOpacity>
         )}
-      </ScrollView>
+      </View>
+
+      {/* 2행: 종목 행 — 헤더 + 가로 스크롤 종목 칩 */}
+      <View style={styles.filterRow}>
+        <Text style={styles.rowLabel}>종목</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {/* 선택된 종목 칩 (복수) */}
+          {filter.stockIds.map((stockId, idx) => (
+            <SelectedStockChip
+              key={stockId}
+              stockId={stockId}
+              stockName={filter.stockNames[idx] ?? stockId}
+              onRemove={handleRemoveStock}
+            />
+          ))}
+
+          {/* 종목 추가 버튼 */}
+          <TouchableOpacity
+            style={[styles.chip, styles.chipInactive]}
+            onPress={onStockPickerOpen}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.chipText, styles.chipTextInactive]}>
+              {filter.stockIds.length > 0 ? '+ 추가' : '종목 선택'}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
+      {/* 3행: 섹터 행 — 헤더 + 가로 스크롤 섹터 칩 */}
+      <View style={styles.filterRow}>
+        <Text style={styles.rowLabel}>섹터</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {sectors.map((sec) => (
+            <SectorFilterChip
+              key={sec.id}
+              sector={sec}
+              active={filter.sectorIds.includes(sec.id)}
+              onToggle={handleToggleSector}
+            />
+          ))}
+          {sectors.length === 0 && (
+            <Text style={styles.emptyRowText}>섹터 없음</Text>
+          )}
+        </ScrollView>
+      </View>
     </View>
   );
 });
 
 const styles = StyleSheet.create({
   container: {
+    paddingBottom: 4,
+  },
+  // 1행: 토글 행 (매매 이벤트 / 뉴스 연관 / 연결 없음)
+  toggleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 6,
+  },
+  // 2행 / 3행: 헤더 + 스크롤 칩 행
+  filterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 20,
+    paddingVertical: 4,
+  },
+  rowLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#737688',
+    width: 28,
+    flexShrink: 0,
+    letterSpacing: 0.3,
   },
   scrollContent: {
     gap: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 4,
+    paddingRight: 20,
+    paddingVertical: 2,
   },
   chip: {
     borderRadius: 9999,
@@ -315,5 +354,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#ba1a1a',
+  },
+  emptyRowText: {
+    fontSize: 12,
+    color: '#9ca3af',
+    paddingVertical: 8,
   },
 });

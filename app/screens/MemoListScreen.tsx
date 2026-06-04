@@ -312,6 +312,8 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
     [handleFilterChange],
   );
 
+  const handleStockPickerOpen = useCallback(() => setStockPickerVisible(true), []);
+
   const renderMemoItem = useCallback(
     ({ item }: { item: MemoItem }) => (
       <MemoCard memo={item} onPress={handleMemoPress} />
@@ -365,7 +367,7 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
         filter={filter}
         sectors={sectors}
         onFilterChange={handleFilterChange}
-        onStockPickerOpen={() => setStockPickerVisible(true)}
+        onStockPickerOpen={handleStockPickerOpen}
       />
 
       {/* 에러 배너 */}
