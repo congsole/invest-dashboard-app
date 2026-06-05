@@ -71,7 +71,7 @@ tests/
 ### 파이프라인
 
 ```
-[사용자: "기획서 변경됐어, 파이프라인 실행해줘"]
+[트리거: docs/planning/ 또는 docs/design/ 변경 커밋]
         │
         ▼
   메인 Claude (오케스트레이터)
@@ -83,11 +83,15 @@ tests/
         │
   api-spec-agent      →  docs/api/api-spec.md 업데이트
         │
+        ▼ [1.5] 설계 결과 커밋
+  git add docs/architecture/ docs/api/
+  git commit -m "[Docs] 설계 업데이트 ({커밋해시} 기반)"
+        │
         ▼ [2] 이슈 생성 (완성된 설계 기반으로 판단, docs 변경 내역 issue.md에 기록)
     pm-agent
     └─ issues/{NNN}-{title}/issue.md 생성 (이슈 번호 auto-increment)
         │
-        ▼ [3] 구현 — n+1 병렬 (BE 순차 1 + FE 병렬 n)
+        ▼ [3] 구현 — n+1 병렬 (BE 순차 1 + FE 병렬 n), resume 지원
   ┌──────────────────────────────┐  ┌─────────────────────┐
   │ BE 체인 (1스레드, 순차)          │  │ FE 병렬 (이슈마다)     │
   │                              │  │                     │
@@ -109,21 +113,55 @@ tests/
   (Maestro → iOS 시뮬레이터, 사용자가 직접 트리거)
 ```
 
+#### 커밋 해시 고정 규칙
+파이프라인 전체에서 기획서/디자인 변경 diff를 볼 때 트리거 커밋 해시를 고정 사용한다:
+- 변경 diff: `git diff {COMMIT_HASH}~1 {COMMIT_HASH} -- {파일}`
+- 설계 에이전트가 수정한 미커밋 변경: `git diff HEAD -- {파일}`
+- `HEAD~1`이나 `HEAD`만 쓰면 사용자가 중간에 새 커밋을 했을 때 잘못된 diff를 볼 수 있다
+
+#### Resume 지원
+issue.md의 구현 현황 체크박스(`[x]` / `[ ]`)를 보고 완료된 단계는 건너뛴다.
+중단된 파이프라인은 `.claude/resume-pipeline.sh`로 재개할 수 있다.
+
 ### 자동화 (검증 완료 — 적용됨)
 
 `claude -p`로 실행한 headless 인스턴스는 메인 Claude와 동일하게 Agent 툴로 서브에이전트를 spawn할 수 있음을 확인했다. (Agent spawn 제한은 에이전트가 spawn한 하위 에이전트에만 적용됨)
 
-`.git/hooks/post-commit`에 구현되어 있으며, 로그는 `.claude/pipeline.log`에 기록된다.
+#### 트리거
+`.git/hooks/post-commit`에 구현. `docs/planning/` 또는 `docs/design/` 변경이 포함된 커밋에만 반응한다.
 
 ```
 git commit (docs/planning/ 또는 docs/design/ 변경)
   → post-commit hook
-  → claude -p "..." (background, PID disown)
-      → [1] domain-model-agent → db-schema-agent → api-spec-agent (순차)
-      → [2] pm-agent (이슈 생성)
-      → [3] 각 이슈 BE/FE 병렬 background
-      → 완료 (E2E는 수동 트리거)
+  → 알림 전송 (Telegram + macOS)
+  → 실시간 현황 터미널 자동 열기
+  → claude -p (프롬프트 템플릿에서 변수 치환, background PID disown)
+      → [1] 설계 → [1.5] 설계 커밋 → [2] PM → [3] BE/FE 병렬
+      → 완료/실패 시 알림 전송
 ```
+
+#### 관련 파일
+| 파일 | 역할 |
+|------|------|
+| `.git/hooks/post-commit` | 트리거 — 변경 감지 및 파이프라인 실행 |
+| `.claude/pipeline-prompt.md` | 프롬프트 템플릿 (`{{COMMIT_HASH}}`, `{{COMMIT_MSG}}`, `{{CHANGED}}` 변수) |
+| `.claude/notify.sh` | Telegram + macOS 알림 전송 (`.env.local`에서 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 로드) |
+| `.claude/watch-pipeline.sh` | 실시간 현황 터미널 (`tail -f logs/pipeline-status.log`) |
+| `.claude/resume-pipeline.sh` | 중단된 파이프라인 재개 (issue.md 체크박스 기반) |
+| `.claude/pipeline.log` | 전체 로그 (`--output-format stream-json --verbose`) |
+| `logs/pipeline-status.log` | 한 줄 요약 현황 로그 (오케스트레이터가 직접 기록) |
+
+#### 현황 로그 형식
+`logs/pipeline-status.log`에 각 에이전트 시작/완료 시점에 한 줄씩 append:
+```bash
+echo "[$(date +%H:%M:%S)] {메시지}" >> logs/pipeline-status.log
+```
+- 파이프라인: `── 파이프라인 시작 ({해시7자리})` / `── 파이프라인 완료 ✅` / `── 파이프라인 실패 ❌`
+- 설계: `[설계] {agent-name} 시작` / `[설계] {agent-name} ✅`
+- PM: `[PM] 이슈 생성 시작` / `[PM] 이슈 {N}개 생성: {번호들}` / `[PM] 이슈 없음 — 종료`
+- 구현: `[{이슈번호}/{BE|FE}] {agent-name} 시작` / `✅` / `❌ ({사유})` / `❌ ({N}/3) 재수정 중`
+
+서브에이전트에게 이 로그를 쓰라고 지시하지 않는다 — 오케스트레이터가 에이전트 호출 전후에 직접 쓴다.
 
 검증 스크립트: `.claude/test-headless-agent-spawn.sh`
 
