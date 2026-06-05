@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: b892f6d — 2026-06-04*
+*최종 업데이트: 4edb385 — 2026-06-05*
 
 ## 엔터티
 
@@ -200,10 +200,26 @@ yfinance `industry` 문자열 → GICS Sub-Industry(L4) code 매핑 테이블. y
 ### MemoSector
 메모-섹터 연결 junction 테이블. 섹터(테마) 기반 메모에 사용. DB 테이블명: `memo_sectors`.
 
+`sector_id`는 **어떤 레벨(L1~L4)이든 가리킬 수 있다.** 메모 작성 시 L1 → L2 → L3 → L4 cascading select로 원하는 단계까지 선택 후 연결하며, 데이터 레벨에서 레벨 제한을 두지 않는다.
+
+#### 섹터 연결 규칙
+- 사용자가 중간 단계(예: L2)에서 확정하면 해당 레벨의 `sector_id`가 저장됨.
+- 예: "정보기술"(L1)만 연결해도 되고, "반도체제조"(L4)까지 내려가서 연결해도 됨.
+
+#### 메모 필터 시 계층 탐색 규칙
+섹터/산업으로 메모를 필터링할 때 다음 **두 경로를 합산(OR)**하여 결과를 반환한다:
+1. **종목 경로**: 해당 섹터/산업의 하위 레벨에 속하는 종목(`stocks.sector_id`)과 연결된 메모.
+2. **직접 연결 경로**: `memo_sectors`로 해당 섹터/산업(및 하위 레벨)에 직접 연결된 메모.
+
+#### 필터 UI 선택 상태 (L1 칩 기준)
+- L1 선택 → 하위 L2 전체 선택. L1 해제 → 하위 L2 전체 해제.
+- L2 일부 선택 → L1 칩 테두리만 색상 표시 (partial 상태).
+- L2 전체 선택 → L1 칩 배경 채움 (all 상태).
+
 | 속성 | 타입 | 설명 | 제약 |
 |------|------|------|------|
 | memo_id | uuid | 메모 ID | PK (복합), FK → memos(id) on delete cascade |
-| sector_id | int | 섹터 ID | PK (복합), FK → sectors(id) on delete cascade |
+| sector_id | int | 섹터 ID (L1~L4 어느 레벨이든 가능) | PK (복합), FK → sectors(id) on delete cascade |
 
 ## 관계
 
@@ -305,3 +321,4 @@ c ∈ {KRW, USD, ...}.
 | [006] 메모 필터 기능 수정 (11f2f4c) | 엔터티·속성·관계 변경 없음. 필터 동작 규칙 변경: (1) 필터 항목명 "매매이벤트 연관" → "매매 연관". (2) 종목 필터 4.1 규칙에서 "직접 연결만 보기" 토글 제거 — 대신 "종목 X + 매매 연관" 동시 선택으로 동일 효과 구현. (3) 필터 결합 방식 명확화: 같은 타입 내 복수 선택 → OR, 타입 간 → AND. (4) "연결 없음" 필터는 다른 필터와 상호 배타적으로 동작(선택 시 나머지 자동 해제). |
 | [006] 메모 필터 UI 수정 (6aab87b) | 엔터티·속성·관계 변경 없음. 필터 UI 레이아웃 변경: 단일 목록 방식 → 세 줄 구조(토글 행 / 종목 행 / 섹터 행). 토글 행에 매매 이벤트·뉴스 연관·연결 없음 토글 배치. "연결 없음"이 별도 필터 항목에서 토글 행으로 이동. 결합 규칙 표현 변경: "같은 타입 내 → OR, 타입 간 → AND" → "같은 행 내 → OR, 다른 행/타입 간 → AND". |
 | [007] 종목 분류 GICS 계층화 (b892f6d) | Sector 엔터티 전면 개편: `id` int → serial, `name_en`/`parent_id`/`level`/`created_at` 속성 추가. GICS 4단계(L1~L4) 자기참조 계층 구조 도입. KrSectorMap 엔터티 폐기 (kr_sector_map 테이블 DROP). GicsYfinanceMap 엔터티 신규 추가 (yfinance industry → GICS L4 매핑). Stock.sector_id 의미 변경: L1 고정 → 가능한 한 L4(Sub-Industry) 가리킴. 관계 변경: KrSectorMap-Sector 제거, Sector 자기참조 추가, GicsYfinanceMap-Sector 추가. |
+| [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | MemoSector 엔터티 설명 확장: sector_id가 L1~L4 어느 레벨이든 가리킬 수 있음을 명시. 섹터 연결 시 cascading select(L1→L2→L3→L4) UI 및 중간 단계 확정 가능 규칙 추가. 메모 필터 계층 탐색 규칙 추가: 종목 경로(stocks.sector_id 기준 하위 탐색) + 직접 연결 경로(memo_sectors) OR 합산. 필터 UI 선택 상태 규칙 추가: L1 partial/all 상태 표시 기준 명시. |

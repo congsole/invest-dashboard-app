@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: b892f6d — 2026-06-04*
+*최종 업데이트: 4edb385 — 2026-06-05*
 
 ## 테이블
 
@@ -314,13 +314,53 @@ yfinance `industry` 문자열 → GICS Sub-Industry(L4) 매핑 테이블. yfinan
 ### memo_sectors
 메모-섹터 N:M 연결 junction 테이블. 섹터(테마) 기반 메모에 사용. 메모 삭제 시 cascade 삭제. 섹터 삭제 시 cascade 삭제(메모 본체는 유지).
 
+`sector_id`는 L1~L4 **어느 레벨이든** 가리킬 수 있다. 메모 작성 시 L1→L2→L3→L4 cascading select로 원하는 단계까지 선택 후 연결하며, DB 레벨에서 레벨 제한을 두지 않는다.
+
 | 컬럼 | 타입 | 기본값 | 제약 | 설명 |
 |------|------|--------|------|------|
 | memo_id | uuid | — | PK (복합), FK → memos(id) ON DELETE CASCADE, not null | 메모 ID |
-| sector_id | int | — | PK (복합), FK → sectors(id) ON DELETE CASCADE, not null | 섹터 ID |
+| sector_id | int | — | PK (복합), FK → sectors(id) ON DELETE CASCADE, not null | 섹터 ID (L1~L4 어느 레벨이든 가능) |
+
+**섹터 연결 규칙**
+- 사용자가 중간 단계(예: L2)에서 확정하면 해당 레벨의 `sector_id`가 저장됨.
+- 예: "정보기술"(L1)만 연결해도 되고, "반도체제조"(L4)까지 내려가서 연결해도 됨.
+
+**메모 필터 시 계층 탐색 규칙**
+
+섹터/산업으로 메모를 필터링할 때, 다음 **두 경로를 합산(OR)**하여 결과를 반환한다:
+
+1. **종목 경로**: 해당 섹터/산업의 하위 레벨에 속하는 종목(`stocks.sector_id`)과 연결된 메모.
+   - 예: L1 "정보기술" 필터 → sector_id가 "정보기술" 하위인 종목에 연결된 메모 포함.
+2. **직접 연결 경로**: `memo_sectors`로 해당 섹터/산업(및 하위 레벨)에 직접 연결된 메모.
+   - 예: L2 "반도체및반도체장비" 필터 → `memo_sectors`에 L2·L3·L4 중 해당 하위가 직접 연결된 메모 포함.
+
+**필터 쿼리 패턴 (의사코드)**
+
+```sql
+-- 선택된 섹터 집합 예: target_sector_ids = [L2 id]
+-- 1. 해당 섹터의 하위 sector_id 전체 집합 (재귀 CTE)
+WITH RECURSIVE descendants AS (
+  SELECT id FROM sectors WHERE id = ANY(:target_sector_ids)
+  UNION ALL
+  SELECT s.id FROM sectors s JOIN descendants d ON s.parent_id = d.id
+)
+-- 2. 종목 경로: 하위 섹터에 속하는 종목과 연결된 메모
+SELECT DISTINCT ms.memo_id FROM memo_stocks ms
+JOIN stocks st ON st.id = ms.stock_id
+WHERE st.sector_id IN (SELECT id FROM descendants)
+UNION
+-- 3. 직접 연결 경로: 하위 섹터에 직접 연결된 메모
+SELECT DISTINCT memo_id FROM memo_sectors
+WHERE sector_id IN (SELECT id FROM descendants);
+```
+
+**필터 UI 선택 상태 (L1 칩 기준)**
+- L1 선택 → 하위 L2 전체 선택. L1 해제 → 하위 L2 전체 해제.
+- L2 일부 선택 → L1 칩 테두리만 색상 표시 (partial 상태).
+- L2 전체 선택 → L1 칩 배경 채움 (all 상태).
 
 **인덱스**
-- `idx_memo_sectors_sector_id` ON (sector_id) — 섹터별 연결 메모 역방향 조회
+- `idx_memo_sectors_sector_id` ON (sector_id) — 섹터별 연결 메모 역방향 조회 및 계층 탐색
 
 **RLS 방향**
 - SELECT / INSERT / DELETE: memo_id를 통해 memos.user_id = auth.uid() 검증 (구현은 supabase-impl-agent)
@@ -380,3 +420,4 @@ memo_sectors }o--|| sectors : "N:1 (sector_id FK, cascade)"
 | [006] 메모 필터 기능 수정 (11f2f4c) | DB 스키마 변경 없음. 필터 UX 동작 규칙 변경(필터 항목명 "매매이벤트 연관" → "매매 연관", 종목 필터 "직접 연결만 보기" 토글 제거, 같은 타입 내 OR · 타입 간 AND 결합 명확화, "연결 없음" 필터의 다른 필터와 상호 배타적 동작)은 앱 레이어에만 영향. |
 | [006] 메모 필터 UI 수정 (6aab87b) | DB 스키마 변경 없음. 필터 UI 레이아웃 변경(단일 목록 → 세 줄 구조: 토글 행 / 종목 행 / 섹터 행, "연결 없음"의 토글 행 이동, 결합 규칙 표현 변경)은 앱 레이어에만 영향. |
 | [007] 종목 분류 GICS 계층화 (b892f6d) | sectors 테이블 전면 개편: `id` int → serial(시퀀스 시작값 13 이상), `name_en`/`parent_id`/`level`/`created_at` 컬럼 추가, GICS 4단계(L1~L4) 자기참조 계층 구조 도입, 인덱스 `idx_sectors_parent_id`·`idx_sectors_level` 추가. stocks 테이블: `sector_id` 의미 변경(L1 고정 → 가능한 한 L4 Sub-Industry, 매핑 실패 시 최하위 레벨). kr_sector_map 테이블 폐기(DROP). gics_yfinance_map 테이블 신규 추가(yfinance industry 문자열 → GICS L4 sector_id 매핑). ERD 관계 업데이트: kr_sector_map 제거, sectors 자기참조·gics_yfinance_map 추가. |
+| [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | DB 스키마(테이블/컬럼) 변경 없음. memo_sectors 테이블 섹션에 비즈니스 규칙 추가: (1) sector_id가 L1~L4 어느 레벨이든 가리킬 수 있음 명시. (2) 섹터 연결 규칙(cascading select, 중간 단계 확정 가능). (3) 메모 필터 계층 탐색 규칙: 종목 경로(stocks.sector_id 기준 하위 탐색) + 직접 연결 경로(memo_sectors) OR 합산, 재귀 CTE 기반 필터 쿼리 패턴 추가. (4) 필터 UI 선택 상태 규칙(L1 partial/all 상태 표시 기준). |
