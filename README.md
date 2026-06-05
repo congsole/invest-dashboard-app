@@ -83,11 +83,6 @@ supabase login
 cd app
 supabase link --project-ref {project-ref}
 ```
-프로젝트 최상단에 .env.local 파일 생성
-```text
-EXPO_PUBLIC_SUPABASE_URL="YOUR_SUPABASE_URL"
-EXPO_PUBLIC_SUPABASE_KEY="YOUR_SUPABASE_ANON_KEY"
-```
 
 마이그레이션 적용:
 
