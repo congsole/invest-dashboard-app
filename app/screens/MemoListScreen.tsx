@@ -30,8 +30,10 @@ import {
   DEFAULT_FILTER_STATE,
   ListMemosParams,
 } from '../types/memo';
-import { Sector, Stock } from '../types/memo';
-import { getSectors, searchStocks } from '../services/memo';
+import { Stock } from '../types/memo';
+import { Sector } from '../types/sector';
+import { searchStocks } from '../services/memo';
+import { getSectors } from '../services/sectors';
 
 // ────────────────────────────────────────────
 // 뷰 타입
@@ -210,6 +212,7 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
   const [calYear, setCalYear] = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth() + 1);
   const [filter, setFilter] = useState<MemoFilterState>(DEFAULT_FILTER_STATE);
+  // L1 섹터 목록
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [stockPickerVisible, setStockPickerVisible] = useState(false);
 
@@ -219,10 +222,15 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
   const filterRef = useRef(filter);
   filterRef.current = filter;
 
-  // 초기 로드
+  // L2 섹터 맵 (key: L1 sector id → value: L2 sectors)
+  // L1 칩 탭 시 해당 L1의 L2를 지연 로딩
+  const [l2SectorMap, setL2SectorMap] = useState<Map<number, Sector[]>>(new Map());
+  const loadedL1IdsRef = useRef<Set<number>>(new Set());
+
+  // 초기 로드: L1 섹터 목록만 가져옴
   useEffect(() => {
     fetch(filterToParams(filter));
-    getSectors().then(setSectors).catch(() => {});
+    getSectors({ level: 1 }).then(setSectors).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetch]);
 
@@ -314,6 +322,32 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
 
   const handleStockPickerOpen = useCallback(() => setStockPickerVisible(true), []);
 
+  // L1 칩 펼침 시 해당 L1의 L2 목록을 지연 로딩
+  // MemoFilter에서 expandedL1Id가 변경될 때 호출되는 콜백 대신,
+  // l2SectorMap을 MemoListScreen에서 관리하고 MemoFilter에 전달한다.
+  // L1 칩의 펼침 버튼이 눌릴 때 트리거: MemoFilter 내에서 expandedL1Id 변경 시
+  // MemoFilter는 expandedL1Id를 내부 상태로 관리하지만, L2 로딩은 부모에서 처리할 수 없음.
+  // 따라서 L2 지연 로딩을 위해 onExpandL1 콜백을 MemoFilter에 추가 전달한다.
+  const handleExpandL1 = useCallback(
+    async (l1SectorId: number | null) => {
+      if (l1SectorId === null) return;
+      // 이미 로딩된 L1은 재요청하지 않음
+      if (loadedL1IdsRef.current.has(l1SectorId)) return;
+      try {
+        const l2List = await getSectors({ level: 2, parent_id: l1SectorId });
+        loadedL1IdsRef.current.add(l1SectorId);
+        setL2SectorMap((prev) => {
+          const next = new Map(prev);
+          next.set(l1SectorId, l2List);
+          return next;
+        });
+      } catch {
+        // L2 로딩 실패는 무시 (L1 선택만으로도 필터 가능)
+      }
+    },
+    [],
+  );
+
   const renderMemoItem = useCallback(
     ({ item }: { item: MemoItem }) => (
       <MemoCard memo={item} onPress={handleMemoPress} />
@@ -365,9 +399,11 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
       {/* 필터 */}
       <MemoFilter
         filter={filter}
-        sectors={sectors}
+        l1Sectors={sectors}
+        l2SectorMap={l2SectorMap}
         onFilterChange={handleFilterChange}
         onStockPickerOpen={handleStockPickerOpen}
+        onExpandL1={handleExpandL1}
       />
 
       {/* 에러 배너 */}

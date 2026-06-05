@@ -307,6 +307,7 @@ export async function unlinkMemoSector(memoId: string, sectorId: number): Promis
 // ────────────────────────────────────────────
 // 종목 등록 또는 조회 + 섹터 자동 추천 (RPC)
 // [012] get_or_recommend_stock_sector RPC로 변경
+// [016] p_naver_industry → p_yfinance_sector/p_yfinance_industry 변경
 // ────────────────────────────────────────────
 
 export interface GetOrRecommendStockInput {
@@ -314,7 +315,10 @@ export interface GetOrRecommendStockInput {
   p_market: 'KR' | 'US' | 'CRYPTO';
   p_name: string;
   p_currency: string;
-  p_naver_industry?: string | null;
+  /** yfinance sector 반환값 (예: "Technology"). L1 추천에 사용. */
+  p_yfinance_sector?: string | null;
+  /** yfinance industry 반환값 (예: "Semiconductor Manufacturing"). L4 추천에 사용. */
+  p_yfinance_industry?: string | null;
 }
 
 export interface GetOrRecommendStockResult {
@@ -329,6 +333,8 @@ export interface GetOrRecommendStockResult {
     id: number;
     code: string;
     name: string;
+    name_en: string | null;
+    level: number;
   } | null;
   is_new: boolean;
   created_at: string;
@@ -338,11 +344,12 @@ export async function getOrRecommendStockSector(
   input: GetOrRecommendStockInput,
 ): Promise<GetOrRecommendStockResult> {
   const { data, error } = await supabase.rpc('get_or_recommend_stock_sector', {
-    p_ticker:         input.p_ticker,
-    p_market:         input.p_market,
-    p_name:           input.p_name,
-    p_currency:       input.p_currency,
-    p_naver_industry: input.p_naver_industry ?? null,
+    p_ticker:            input.p_ticker,
+    p_market:            input.p_market,
+    p_name:              input.p_name,
+    p_currency:          input.p_currency,
+    p_yfinance_sector:   input.p_yfinance_sector ?? null,
+    p_yfinance_industry: input.p_yfinance_industry ?? null,
   });
 
   if (error) throw error;

@@ -1,30 +1,40 @@
-// Sector / Stock / KrSectorMap 공통 타입 정의
+// Sector / Stock 공통 타입 정의
 // api-spec.md — Sector / Stock 섹션 기반
 // [012] stocks 재설계: asset_type → market, currency/is_active 추가
+// [016] GICS 계층화: Sector에 name_en/parent_id/level 추가, SectorBreadcrumb 추가
 
 // ────────────────────────────────────────────
 // Sector
 // ────────────────────────────────────────────
 
-export type SectorCode =
-  | 'IT'
-  | 'HEALTHCARE'
-  | 'FINANCIALS'
-  | 'CONS_DISC'
-  | 'CONS_STAPLES'
-  | 'COMM'
-  | 'INDUSTRIALS'
-  | 'MATERIALS'
-  | 'ENERGY'
-  | 'UTILITIES'
-  | 'REAL_ESTATE'
-  | 'CRYPTO';
+export type SectorCode = string;
+
+/** GICS 계층 레벨 (1=Sector, 2=Industry Group, 3=Industry, 4=Sub-Industry) */
+export type SectorLevel = 1 | 2 | 3 | 4;
 
 export interface Sector {
-  id: number;    // 1~12 고정
+  id: number;
   code: SectorCode;
-  name: string;  // '정보기술' | '헬스케어' | '금융' | ...
+  name: string;           // 한글명 (예: '정보기술', '반도체제조')
+  name_en: string | null; // 영문명 (예: 'Information Technology', 'Semiconductor Manufacturing')
+  parent_id: number | null; // L1은 null, L2~L4는 상위 섹터 ID
+  level: SectorLevel;     // 1~4
 }
+
+/**
+ * get_sector_breadcrumb RPC 응답의 단일 항목.
+ * level 오름차순 정렬 (L1 → L2 → L3 → L4).
+ */
+export interface SectorBreadcrumbItem {
+  id: number;
+  code: SectorCode;
+  name: string;
+  name_en: string | null;
+  level: SectorLevel;
+}
+
+/** getSectorBreadcrumb 반환 타입 */
+export type SectorBreadcrumb = SectorBreadcrumbItem[];
 
 // ────────────────────────────────────────────
 // Stock
@@ -45,12 +55,12 @@ export interface Stock {
   name: string;
   market: StockMarket;
   currency: string;         // 'KRW' | 'USD'
-  sector_id: number | null;
+  sector_id: number | null; // 가능한 한 GICS L4(Sub-Industry), 매핑 실패 시 최하위 레벨
   is_active: boolean;
   created_at: string;
 }
 
-/** stocks.select('*, sectors(id, code, name)') 응답 형태 */
+/** stocks.select('*, sectors(id, code, name, name_en, parent_id, level)') 응답 형태 */
 export interface StockWithSector extends Stock {
   sectors: Sector | null;
 }
@@ -71,13 +81,24 @@ export interface StockSearchResult {
     id: number;
     code: string;
     name: string;
+    name_en: string | null;
+    parent_id: number | null;
+    level: SectorLevel;
   } | null;
 }
 
 // ────────────────────────────────────────────
 // get_or_recommend_stock_sector RPC 응답
-// (구: upsert_stock_with_sector)
+// (이슈 016: p_naver_industry → p_yfinance_sector/p_yfinance_industry)
 // ────────────────────────────────────────────
+
+export interface RecommendedSector {
+  id: number;
+  code: SectorCode;
+  name: string;
+  name_en: string | null;
+  level: SectorLevel;
+}
 
 export interface GetOrRecommendStockSectorResult {
   id: string;
@@ -87,7 +108,7 @@ export interface GetOrRecommendStockSectorResult {
   currency: string;
   is_active: boolean;
   sector_id: number | null;
-  recommended_sector: Sector | null;
+  recommended_sector: RecommendedSector | null;
   is_new: boolean;
   created_at: string;
 }
@@ -116,10 +137,10 @@ export interface ExternalStockSearchResult {
   name: string;
   market: StockMarket;
   currency: string;
-  /** 한국 주식의 네이버 업종명 (섹터 추천에 사용) */
-  naver_industry?: string | null;
-  /** 미국 주식의 GICS 섹터 코드 (섹터 추천에 사용) */
-  gics_code?: string | null;
+  /** yfinance sector 반환값 (예: "Technology"). 섹터 L1 추천에 사용. */
+  yfinance_sector?: string | null;
+  /** yfinance industry 반환값 (예: "Semiconductor Manufacturing"). 섹터 L4 추천에 사용. */
+  yfinance_industry?: string | null;
 }
 
 export interface ExternalStockSearchResponse {

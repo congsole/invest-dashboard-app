@@ -4,15 +4,16 @@
  * API 명세 참조: docs/api/api-spec.md — Stock 섹션
  * [009] 초기 작성: 종목 단건 조회, upsert + 섹터 추천 RPC, 섹터 수동 지정
  * [012] 재설계: asset_type → market, 로컬 검색 추가, FastAPI 외부 검색 연동 추가
+ * [016] GICS 계층화: sectors join 필드 확장(name_en/parent_id/level), getOrRecommendStockSector RPC 파라미터 변경(naver_industry → yfinance_sector/yfinance_industry)
  */
 
-import { supabase } from '../utils/supabase';
+import {supabase} from '../utils/supabase';
 import {
-  StockMarket,
-  StockWithSector,
-  StockSearchResult,
-  GetOrRecommendStockSectorResult,
   ExternalStockSearchResponse,
+  GetOrRecommendStockSectorResult,
+  StockMarket,
+  StockSearchResult,
+  StockWithSector,
 } from '../types/sector';
 
 // ────────────────────────────────────────────
@@ -40,7 +41,7 @@ export async function searchStocksLocal(
 
   let query = supabase
     .from('stocks')
-    .select('id, ticker, name, market, currency, sector_id, is_active, sectors(id, code, name)')
+    .select('id, ticker, name, market, currency, sector_id, is_active, sectors(id, code, name, name_en, parent_id, level)')
     .or(`ticker.ilike.%${q}%,name.ilike.%${q}%`)
     .eq('is_active', true)
     .order('name', { ascending: true })
@@ -72,7 +73,7 @@ export async function getStock(
 ): Promise<StockWithSector | null> {
   const { data, error } = await supabase
     .from('stocks')
-    .select('*, sectors(id, code, name)')
+    .select('*, sectors(id, code, name, name_en, parent_id, level)')
     .eq('ticker', ticker)
     .eq('market', market)
     .maybeSingle();
@@ -93,8 +94,7 @@ export async function getStock(
 // 이 함수는 기존 종목 조회 또는 섹터 추천 결과만 반환.
 //
 // - CRYPTO: CRYPTO 섹터 고정
-// - KR: kr_sector_map → GICS 변환 (naver_industry 필요)
-// - US: GICS 코드를 naver_industry에 직접 전달 (선택)
+// - KR/US: gics_yfinance_map → sectors.name_en → L1 폴백 순서로 탐색 (yfinance 단일 경로)
 // ────────────────────────────────────────────
 
 export interface GetOrRecommendStockSectorInput {
@@ -102,19 +102,28 @@ export interface GetOrRecommendStockSectorInput {
   market: StockMarket;
   name: string;
   currency: string;
-  /** KR: 네이버 업종명. US: GICS 코드(선택). CRYPTO: 불필요. */
-  naver_industry?: string | null;
+  /**
+   * yfinance sector 반환값 (예: "Technology").
+   * L1 추천에 사용. null이면 L1 추천 불가. CRYPTO는 무시.
+   */
+  yfinance_sector?: string | null;
+  /**
+   * yfinance industry 반환값 (예: "Semiconductor Manufacturing").
+   * L4 추천에 사용. null이면 L1까지만 추천.
+   */
+  yfinance_industry?: string | null;
 }
 
 export async function getOrRecommendStockSector(
   input: GetOrRecommendStockSectorInput,
 ): Promise<GetOrRecommendStockSectorResult> {
   const { data, error } = await supabase.rpc('get_or_recommend_stock_sector', {
-    p_ticker:          input.ticker,
-    p_market:          input.market,
-    p_name:            input.name,
-    p_currency:        input.currency,
-    p_naver_industry:  input.naver_industry ?? null,
+    p_ticker:            input.ticker,
+    p_market:            input.market,
+    p_name:              input.name,
+    p_currency:          input.currency,
+    p_yfinance_sector:   input.yfinance_sector ?? null,
+    p_yfinance_industry: input.yfinance_industry ?? null,
   });
 
   if (error) {
@@ -184,8 +193,7 @@ export async function searchStocksExternal(
     );
   }
 
-  const json = (await response.json()) as ExternalStockSearchResponse;
-  return json;
+  return (await response.json()) as ExternalStockSearchResponse;
 }
 
 // ────────────────────────────────────────────
@@ -278,6 +286,5 @@ export async function updateStockSector(
     );
   }
 
-  const updated = (await response.json()) as StockWithSector;
-  return updated;
+  return (await response.json()) as StockWithSector;
 }

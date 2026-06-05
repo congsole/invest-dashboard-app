@@ -28,8 +28,9 @@ import {
 } from 'react-native';
 import { useMemoDetail } from '../hooks/useMemoDetail';
 import { useMemoMutation } from '../hooks/useMemoMutation';
-import { getSectors } from '../services/memo';
-import { Sector, MemoStockInput, ENTITY_COLORS } from '../types/memo';
+import { getSectors } from '../services/sectors';
+import { Sector } from '../types/sector';
+import { MemoStockInput, ENTITY_COLORS } from '../types/memo';
 import { EntityChip } from '../components/EntityChip';
 import { StockSearchModal, SelectedStockInfo } from '../components/StockSearchModal';
 
@@ -72,9 +73,9 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [stockModalVisible, setStockModalVisible] = useState(false);
 
-  // 섹터 목록 로드
+  // 섹터 목록 로드 (L1만 — 메모 연결에는 L1 단위 선택만 허용)
   useEffect(() => {
-    getSectors().then(setSectors).catch(() => {});
+    getSectors({ level: 1 }).then(setSectors).catch(() => {});
   }, []);
 
   // 편집 모드: 기존 데이터 로드
