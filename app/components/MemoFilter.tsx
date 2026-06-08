@@ -11,11 +11,14 @@
  *   2행 (종목 행): "종목" 헤더 + 가로 스크롤 종목 칩
  *   3행 (섹터 행): "섹터" 헤더 + L1 칩 나열, L1 탭 시 L2 칩 펼침
  *
- * 섹터 필터 동작 (이슈 018):
- *   - L1 선택 → 해당 L2 전체 선택, L1 해제 → 해당 L2 전체 해제
+ * 섹터 필터 동작 (이슈 022):
+ *   - L1 선택 → L1 id를 sectorIds에 즉시 추가 (L2 미로딩 상태도 가능)
+ *     RPC 재귀 CTE가 L1 하위 전체를 자동 포함하므로 L2 로딩 여부와 무관하게 동일 결과 보장
+ *   - L2 로딩 완료 후 → L2 id들을 sectorIds에 보충 추가 (L1 id 유지)
+ *   - L1 해제 → L1 id + 하위 L2 id 전체 제거
  *   - L2 일부 선택 → L1 테두리만 색상 (partial)
  *   - L2 전체 선택 → L1 배경 채움 (all)
- *   - sectorIds에는 L2 id만 저장 (L1 id는 저장하지 않음)
+ *   - sectorIds에는 L1 id와 L2 id가 모두 저장됨
  *
  * [019] 필터 동작 확인:
  *   - list_memos RPC가 "종목 경로 + 직접 연결 경로 OR 합산"으로 확장됨
@@ -160,7 +163,7 @@ const L1SectorChip = React.memo(function L1SectorChip({
         <Text
           style={[
             l1ChipStyles.arrow,
-            (isAll || isPartial || isExpanded) && l1ChipStyles.arrowActive,
+            (isAll || isPartial) && l1ChipStyles.arrowActive,
           ]}
         >
           {isExpanded ? '▲' : '▼'}
@@ -283,21 +286,32 @@ export const MemoFilter = React.memo(function MemoFilter({
   // 현재 expanded된 L1 sector id (하나만 펼침)
   const [expandedL1Id, setExpandedL1Id] = React.useState<number | null>(null);
 
-  // L1별 L2 선택 상태 계산
+  // L1별 선택 상태 계산
+  // - L2가 로딩된 경우: L2 선택 수 기반으로 none/partial/all 판단
+  // - L2가 아직 로딩 안 된 경우: L1 id가 sectorIds에 있으면 all, 없으면 none
   const l1SelectionStates = useMemo(() => {
     const states = new Map<number, L1SelectionState>();
-    for (const [l1Id, l2List] of l2SectorMap) {
-      if (l2List.length === 0) {
-        states.set(l1Id, 'none');
+    for (const l1Sector of l1Sectors) {
+      const l1Id = l1Sector.id;
+      const l1Selected = filter.sectorIds.includes(l1Id);
+      const l2List = l2SectorMap.get(l1Id);
+
+      if (l2List === undefined) {
+        // L2 미로딩: L1 id 포함 여부로 판단
+        states.set(l1Id, l1Selected ? 'all' : 'none');
         continue;
       }
-      const selectedCount = l2List.filter((s) => filter.sectorIds.includes(s.id)).length;
-      if (selectedCount === 0) states.set(l1Id, 'none');
-      else if (selectedCount === l2List.length) states.set(l1Id, 'all');
-      else states.set(l1Id, 'partial');
+      if (l2List.length === 0) {
+        states.set(l1Id, l1Selected ? 'all' : 'none');
+        continue;
+      }
+      const selectedL2Count = l2List.filter((s) => filter.sectorIds.includes(s.id)).length;
+      if (selectedL2Count === l2List.length) states.set(l1Id, 'all');
+      else if (selectedL2Count > 0 || l1Selected) states.set(l1Id, 'partial');
+      else states.set(l1Id, 'none');
     }
     return states;
-  }, [l2SectorMap, filter.sectorIds]);
+  }, [l1Sectors, l2SectorMap, filter.sectorIds]);
 
   const handleToggleTradeEvents = useCallback(() => {
     onFilterChange({ tradeEventsOnly: !filter.tradeEventsOnly, noLinks: false });
@@ -332,32 +346,50 @@ export const MemoFilter = React.memo(function MemoFilter({
     });
   }, [onExpandL1]);
 
-  // L1 칩 선택 토글 → 하위 L2 전체 선택/해제
+  // L1 칩 선택 토글
+  // - 선택: L1 id를 즉시 sectorIds에 추가. L2가 이미 로딩된 경우 L2 id들도 함께 추가.
+  // - 해제: L1 id + 하위 L2 id 전체 제거
   const handleToggleL1Sector = useCallback(
     (sectorId: number) => {
-      const l2List = l2SectorMap.get(sectorId);
-      if (!l2List || l2List.length === 0) return;
-
       const currentState = l1SelectionStates.get(sectorId) ?? 'none';
+      const l2List = l2SectorMap.get(sectorId) ?? [];
       const l2Ids = new Set(l2List.map((s) => s.id));
 
-      if (currentState === 'all') {
-        // 전체 해제: 해당 L1의 L2들을 모두 제거
-        const newIds = filter.sectorIds.filter((id) => !l2Ids.has(id));
-        const newNames = filter.sectorNames.filter(
-          (_, i) => !l2Ids.has(filter.sectorIds[i]),
-        );
+      if (currentState !== 'none') {
+        // 해제: L1 id + 하위 L2 id 전체 제거
+        const removeIds = new Set([sectorId, ...l2Ids]);
+        const newIds = filter.sectorIds.filter((id) => !removeIds.has(id));
+        const newNames = filter.sectorNames.filter((_, i) => !removeIds.has(filter.sectorIds[i]));
         onFilterChange({ sectorIds: newIds, sectorNames: newNames });
       } else {
-        // 전체 선택: 해당 L1의 L2들 중 미선택인 것을 추가
+        // 선택: L1 id를 즉시 추가. L2가 로딩된 경우 L2 id들도 함께 추가.
         const existingIds = new Set(filter.sectorIds);
-        const idsToAdd = l2List.filter((s) => !existingIds.has(s.id));
-        const newIds = [...filter.sectorIds, ...idsToAdd.map((s) => s.id)];
-        const newNames = [...filter.sectorNames, ...idsToAdd.map((s) => s.name)];
-        onFilterChange({ sectorIds: newIds, sectorNames: newNames, noLinks: false });
+        const idsToAdd: number[] = [];
+        const namesToAdd: string[] = [];
+
+        // L1 id 추가 (아직 없는 경우)
+        if (!existingIds.has(sectorId)) {
+          const l1Sector = l1Sectors.find((s) => s.id === sectorId);
+          idsToAdd.push(sectorId);
+          namesToAdd.push(l1Sector?.name ?? '');
+        }
+
+        // L2 id 추가 (로딩된 경우에만)
+        for (const l2 of l2List) {
+          if (!existingIds.has(l2.id)) {
+            idsToAdd.push(l2.id);
+            namesToAdd.push(l2.name);
+          }
+        }
+
+        onFilterChange({
+          sectorIds: [...filter.sectorIds, ...idsToAdd],
+          sectorNames: [...filter.sectorNames, ...namesToAdd],
+          noLinks: false,
+        });
       }
     },
-    [filter.sectorIds, filter.sectorNames, l2SectorMap, l1SelectionStates, onFilterChange],
+    [filter.sectorIds, filter.sectorNames, l1Sectors, l2SectorMap, l1SelectionStates, onFilterChange],
   );
 
   // L2 칩 선택 토글

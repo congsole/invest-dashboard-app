@@ -28,7 +28,7 @@ function buildChips(memo: MemoItem): Array<{ entityType: EntityType; label: stri
   const chips: Array<{ entityType: EntityType; label: string; key: string }> = [];
 
   for (const s of memo.stocks) {
-    chips.push({ entityType: 'stock', label: s.ticker, key: `stock-${s.stock_id}` });
+    chips.push({ entityType: 'stock', label: s.name, key: `stock-${s.stock_id}` });
   }
   for (const te of memo.trade_events) {
     const label = te.ticker ? `${te.event_type === 'buy' ? '매수' : '매도'} ${te.ticker}` : te.event_type === 'buy' ? '매수' : '매도';

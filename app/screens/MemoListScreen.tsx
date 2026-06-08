@@ -6,34 +6,28 @@
  * - 렌더링 최적화: initialLoading(초기), refreshing(당김 새로고침) 분리
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
   ActivityIndicator,
-  RefreshControl,
+  FlatList,
   Modal,
-  TextInput,
+  RefreshControl,
+  SafeAreaView,
   ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useMemos } from '../hooks/useMemos';
-import { CalendarView } from '../components/CalendarView';
-import { MemoCard } from '../components/MemoCard';
-import { MemoFilter } from '../components/MemoFilter';
-import {
-  MemoItem,
-  MemoFilterState,
-  DEFAULT_FILTER_STATE,
-  ListMemosParams,
-} from '../types/memo';
-import { Stock } from '../types/memo';
-import { Sector } from '../types/sector';
-import { searchStocks } from '../services/memo';
-import { getSectors } from '../services/sectors';
+import {useMemos} from '../hooks/useMemos';
+import {CalendarView} from '../components/CalendarView';
+import {MemoCard} from '../components/MemoCard';
+import {MemoFilter} from '../components/MemoFilter';
+import {DEFAULT_FILTER_STATE, ListMemosParams, MemoFilterState, MemoItem, Stock,} from '../types/memo';
+import {Sector} from '../types/sector';
+import {searchStocks} from '../services/memo';
+import {getSectors} from '../services/sectors';
 
 // ────────────────────────────────────────────
 // 뷰 타입
@@ -340,6 +334,25 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
           const next = new Map(prev);
           next.set(l1SectorId, l2List);
           return next;
+        });
+
+        // L2 로딩 완료 후: L1이 이미 선택된 상태라면 L2 id들을 sectorIds에 보충 추가
+        // (L1 id만으로 RPC가 올바른 결과를 반환하지만, UI 표시를 위해 L2 id도 저장)
+        setFilter((prevFilter) => {
+          const isL1Selected = prevFilter.sectorIds.includes(l1SectorId);
+          if (!isL1Selected || l2List.length === 0) return prevFilter;
+
+          const existingIds = new Set(prevFilter.sectorIds);
+          const idsToAdd = l2List.filter((s) => !existingIds.has(s.id));
+          if (idsToAdd.length === 0) return prevFilter;
+
+          // 필터 변경 시 RPC 재호출은 하지 않음 — L1 id만으로 동일 결과 보장
+          // (handleFilterChange를 쓰면 불필요한 fetch가 발생하므로 setFilter만 호출)
+          return {
+            ...prevFilter,
+            sectorIds: [...prevFilter.sectorIds, ...idsToAdd.map((s) => s.id)],
+            sectorNames: [...prevFilter.sectorNames, ...idsToAdd.map((s) => s.name)],
+          };
         });
       } catch {
         // L2 로딩 실패는 무시 (L1 선택만으로도 필터 가능)
