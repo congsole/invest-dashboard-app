@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 4edb385 — 2026-06-05*
+*최종 업데이트: 4cb2f12 — 2026-06-08*
 
 ## 엔터티
 
@@ -126,7 +126,7 @@ Supabase Auth가 관리하는 인증 제공자 연동 정보. `auth.identities` 
 |------|------|------|------|
 | id | uuid | 기본 키 | PK, not null |
 | ticker | text | 종목 코드 또는 코인 티커 (KR: '005930', US: 'AAPL', Crypto: 'BTC') | not null |
-| name | text | 종목명 (한글 우선, 없으면 영문) | not null |
+| name | text | 종목명 (한글 우선, 없으면 영문). 메모 리스트형 종목 칩 라벨로 시장(market)에 관계없이 항상 이 값을 표시한다. 한국 주식 티커는 숫자 코드라 사용자가 식별하기 어렵기 때문에 종목명 우선. | not null |
 | market | text | 시장 구분 (KR / US / CRYPTO) | not null |
 | currency | text | 거래 통화 (KRW / USD / KRW(업비트)) | not null |
 | sector_id | int | 섹터 ID. 가능한 한 GICS Level 4(Sub-Industry)를 가리킴. yfinance 매핑 실패 시 매핑 가능한 최하위 레벨(L1까지). 적재 시 자동 추천 후 수동 보정 가능. | FK → sectors(id), nullable |
@@ -209,10 +209,20 @@ yfinance `industry` 문자열 → GICS Sub-Industry(L4) code 매핑 테이블. y
 #### 메모 필터 시 계층 탐색 규칙
 섹터/산업으로 메모를 필터링할 때 다음 **두 경로를 합산(OR)**하여 결과를 반환한다:
 1. **종목 경로**: 해당 섹터/산업의 하위 레벨에 속하는 종목(`stocks.sector_id`)과 연결된 메모.
-2. **직접 연결 경로**: `memo_sectors`로 해당 섹터/산업(및 하위 레벨)에 직접 연결된 메모.
+   - 예: L1 "정보기술" 필터 → `sector_id`가 L1·L2·L3·L4 어디든 "정보기술" 하위인 종목에 연결된 메모 포함.
+2. **직접 연결 경로**: `memo_sectors`로 해당 섹터/산업 **자신 및 하위 레벨**에 직접 연결된 메모.
+   - 예: L1 "정보기술" 필터 → `memo_sectors`에 L1 자신(정보기술)이 직접 연결된 메모 + L2·L3·L4 하위가 연결된 메모 모두 포함.
+   - 예: L2 "반도체및반도체장비" 필터 → `memo_sectors`에 L2 자신 + L3·L4 하위가 직접 연결된 메모 포함.
 
-#### 필터 UI 선택 상태 (L1 칩 기준)
-- L1 선택 → 하위 L2 전체 선택. L1 해제 → 하위 L2 전체 해제.
+> **핵심**: `sectorIds`에 L1 id가 포함되므로, 종목과 연관되지 않고 L1 섹터에만 직접 연결된 메모도 필터 결과에 누락되지 않는다.
+
+#### 필터 UI 선택 상태 및 sectorIds 동작 (L1 칩 기준)
+- **L1 선택 시**:
+  - L2가 이미 로딩된 경우: L1 id + 하위 L2 id 전체를 `sectorIds`에 추가.
+  - L2가 아직 로딩되지 않은 경우에도 즉시 동작: L1 id만 `sectorIds`에 추가하여 필터를 즉시 적용한다. RPC의 재귀 CTE가 L1 하위 전체를 자동으로 포함시키므로 L2 로딩 여부와 무관하게 동일한 필터 결과를 보장한다.
+  - L2가 이후에 로딩되면, UI 표시를 위해 L2 id들도 `sectorIds`에 보충 추가한다 (L1 id는 유지).
+- **`sectorIds`에는 L1 id와 L2 id가 모두 저장된다.** L1 id 포함으로 인해 L1에 직접 연결된 메모(`memo_sectors.sector_id = L1 id`)도 필터 결과에 포함된다.
+- L1 해제 → L1 id + 하위 L2 id 전체 제거.
 - L2 일부 선택 → L1 칩 테두리만 색상 표시 (partial 상태).
 - L2 전체 선택 → L1 칩 배경 채움 (all 상태).
 
@@ -322,3 +332,4 @@ c ∈ {KRW, USD, ...}.
 | [006] 메모 필터 UI 수정 (6aab87b) | 엔터티·속성·관계 변경 없음. 필터 UI 레이아웃 변경: 단일 목록 방식 → 세 줄 구조(토글 행 / 종목 행 / 섹터 행). 토글 행에 매매 이벤트·뉴스 연관·연결 없음 토글 배치. "연결 없음"이 별도 필터 항목에서 토글 행으로 이동. 결합 규칙 표현 변경: "같은 타입 내 → OR, 타입 간 → AND" → "같은 행 내 → OR, 다른 행/타입 간 → AND". |
 | [007] 종목 분류 GICS 계층화 (b892f6d) | Sector 엔터티 전면 개편: `id` int → serial, `name_en`/`parent_id`/`level`/`created_at` 속성 추가. GICS 4단계(L1~L4) 자기참조 계층 구조 도입. KrSectorMap 엔터티 폐기 (kr_sector_map 테이블 DROP). GicsYfinanceMap 엔터티 신규 추가 (yfinance industry → GICS L4 매핑). Stock.sector_id 의미 변경: L1 고정 → 가능한 한 L4(Sub-Industry) 가리킴. 관계 변경: KrSectorMap-Sector 제거, Sector 자기참조 추가, GicsYfinanceMap-Sector 추가. |
 | [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | MemoSector 엔터티 설명 확장: sector_id가 L1~L4 어느 레벨이든 가리킬 수 있음을 명시. 섹터 연결 시 cascading select(L1→L2→L3→L4) UI 및 중간 단계 확정 가능 규칙 추가. 메모 필터 계층 탐색 규칙 추가: 종목 경로(stocks.sector_id 기준 하위 탐색) + 직접 연결 경로(memo_sectors) OR 합산. 필터 UI 선택 상태 규칙 추가: L1 partial/all 상태 표시 기준 명시. |
+| [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | Stock.name 속성 설명 확장: 메모 리스트형 종목 칩 라벨은 market에 관계없이 항상 name(종목명) 표시 규칙 명시. MemoSector 계층 탐색 규칙 명확화: 직접 연결 경로가 "자신 및 하위 레벨" 임을 명시 (L1 선택 시 L1 자신도 포함). 필터 UI sectorIds 동작 상세화: L2 미로딩 시 L1 id만으로 즉시 필터 적용 가능(RPC 재귀 CTE 보장), 이후 L2 로딩 시 보충 추가, sectorIds에 L1+L2 id 모두 저장 명시. |
