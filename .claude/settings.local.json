@@ -27,7 +27,26 @@
       "Bash(supabase db:*)",
       "Bash(supabase migration:*)",
       "Bash(npx jest:*)",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Bash(mv supabase/migrations/20260604000000_memo_filter_update.sql supabase/migrations/20260604000000_memo_filter_update.sql.bak)",
+      "Bash(mv supabase/migrations/20260604000000_memo_filter_update.sql.bak supabase/migrations/20260604000000_memo_filter_update.sql)",
+      "Bash(npx tsc:*)",
+      "Bash(pip3 --version)",
+      "Bash(pip --version)",
+      "Bash(scripts/.venv/bin/pip install:*)",
+      "Bash(scripts/.venv/bin/python scripts/sync_stocks.py)",
+      "Bash(scripts/.venv/bin/python:*)",
+      "Bash(scripts/.venv/bin/pip show:*)",
+      "Bash(kill 18146 17780)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(kill 18886)",
+      "Bash(kill 19171)",
+      "WebSearch",
+      "Bash(kill 20973)",
+      "Bash(kill 21397)",
+      "Bash(kill 22186)",
+      "Bash(kill 22313)",
+      "Bash(kill 22856)"
     ]
   }
 }

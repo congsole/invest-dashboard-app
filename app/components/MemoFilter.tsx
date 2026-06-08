@@ -16,6 +16,13 @@
  *   - L2 일부 선택 → L1 테두리만 색상 (partial)
  *   - L2 전체 선택 → L1 배경 채움 (all)
  *   - sectorIds에는 L2 id만 저장 (L1 id는 저장하지 않음)
+ *
+ * [019] 필터 동작 확인:
+ *   - list_memos RPC가 "종목 경로 + 직접 연결 경로 OR 합산"으로 확장됨
+ *   - sectorIds에 L2 id를 보내면 RPC 내부에서 아래 두 경로를 합산:
+ *     1) 해당 L2 하위 종목에 연결된 메모 (종목 경로)
+ *     2) memo_sectors에 직접 L2/L3/L4로 연결된 메모 (직접 연결 경로)
+ *   - 프론트에서 별도 변경 없이 L3/L4로 직접 연결된 메모도 필터 결과에 포함됨
  */
 
 import React, { useCallback, useMemo } from 'react';

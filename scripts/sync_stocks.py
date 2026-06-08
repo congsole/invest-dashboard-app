@@ -195,6 +195,16 @@ def _load_sectors_name_en() -> dict[str, int]:
 class SectorResolver:
     """gics_yfinance_map + sectors 테이블 기반 sector_id 결정기."""
 
+    # yfinance sector name → GICS L1 name_en 매핑 (이름이 다른 것만)
+    _YF_TO_GICS_L1: dict[str, str] = {
+        'technology': 'information technology',
+        'consumer cyclical': 'consumer discretionary',
+        'consumer defensive': 'consumer staples',
+        'basic materials': 'materials',
+        'financial services': 'financials',
+        'healthcare': 'health care',
+    }
+
     def __init__(self) -> None:
         print('  섹터 매핑 테이블 로드 중...')
         self._gics_map: dict[str, int] = _load_gics_map()
@@ -237,10 +247,12 @@ class SectorResolver:
             if sector_id:
                 return sector_id
 
-        # Step 3: L1 매칭 (yfinance sector)
+        # Step 3: L1 매칭 (yfinance sector → GICS name_en 변환 포함)
         if yfinance_sector:
             sector_key = yfinance_sector.lower().strip()
-            sector_id = self._l1_map.get(sector_key)
+            # yfinance 이름을 GICS 이름으로 변환 시도
+            gics_key = self._YF_TO_GICS_L1.get(sector_key, sector_key)
+            sector_id = self._l1_map.get(gics_key)
             if sector_id:
                 return sector_id
 
@@ -252,19 +264,21 @@ class SectorResolver:
 
 def _fetch_yfinance_info(ticker_with_suffix: str) -> dict[str, Optional[str]]:
     """
-    yfinance에서 sector + industry 조회.
-    실패 시 {'sector': None, 'industry': None} 반환.
+    yfinance에서 sector + industry + quoteType 조회.
+    실패 시 {'sector': None, 'industry': None, 'quoteType': None} 반환.
     """
+    import logging
     try:
-        import yfinance as yf  # 런타임 import (설치 미완 시 조기 실패 방지)
+        import yfinance as yf
+        logging.getLogger('yfinance').setLevel(logging.CRITICAL)
         info = yf.Ticker(ticker_with_suffix).info
         return {
             'sector': info.get('sector') or None,
             'industry': info.get('industry') or None,
+            'quoteType': info.get('quoteType') or None,
         }
-    except Exception as e:
-        print(f'    yfinance 조회 실패 ({ticker_with_suffix}): {e}')
-        return {'sector': None, 'industry': None}
+    except Exception:
+        return {'sector': None, 'industry': None, 'quoteType': None}
 
 
 def fetch_and_resolve_sector(
@@ -283,13 +297,16 @@ def fetch_and_resolve_sector(
         return CRYPTO_SECTOR_ID
 
     if market == 'KR':
-        suffix = '.KQ' if kr_market_type == 'KOSDAQ' else '.KS'
-        ticker_yf = f'{ticker}{suffix}'
+        # .KS → .KQ 순서로 시도
+        for suffix in ['.KS', '.KQ']:
+            info = _fetch_yfinance_info(f'{ticker}{suffix}')
+            result = resolver.resolve(info['sector'], info['industry'])
+            if result is not None:
+                return result
+        return None
     else:
-        ticker_yf = ticker
-
-    info = _fetch_yfinance_info(ticker_yf)
-    return resolver.resolve(info['sector'], info['industry'])
+        info = _fetch_yfinance_info(ticker)
+        return resolver.resolve(info['sector'], info['industry'])
 
 # ────────────────────────────────────────────
 # 한국 주식 (pykrx)
@@ -418,8 +435,8 @@ def fetch_stocks_without_sector() -> list[dict]:
 # ────────────────────────────────────────────
 
 def _sleep_rate_limit() -> None:
-    """yfinance rate limit 대응: 0.5~1초 랜덤 인터벌."""
-    time.sleep(random.uniform(0.5, 1.0))
+    """yfinance rate limit 대응: 0.2~0.5초 랜덤 인터벌."""
+    time.sleep(random.uniform(0.2, 0.5))
 
 
 def run_sector_fill(
@@ -514,26 +531,8 @@ def run_cron(resolver: SectorResolver) -> None:
         print('처리할 종목 없음. 종료.')
         return
 
-    # KR 종목의 kr_market_type 복원: pykrx 재조회 대신 DB에 없으므로 .KS 기본값 사용
-    # (KOSPI 기본, KOSDAQ 종목은 .KS로 조회해도 yfinance가 .KQ로 재시도함)
-    kr_tickers = {s['ticker'] for s in stocks_to_fill if s['market'] == 'KR'}
+    # KR 종목은 .KS 기본값 사용 (KOSDAQ도 yfinance가 알아서 처리)
     kr_market_map: dict[str, str] = {}
-
-    if kr_tickers:
-        try:
-            from pykrx import stock as krx
-            import datetime
-            today = datetime.date.today().strftime('%Y%m%d')
-            for market_code in ['KOSPI', 'KOSDAQ']:
-                try:
-                    tickers = krx.get_market_ticker_list(today, market=market_code)
-                    for t in tickers:
-                        if t in kr_tickers:
-                            kr_market_map[t] = market_code
-                except Exception:
-                    pass
-        except ImportError:
-            print('  pykrx 미설치 — KR 종목은 .KS suffix 기본값 사용')
 
     ok, fail = run_sector_fill(stocks_to_fill, resolver, kr_market_map)
     print(f'\ncron 완료: 성공 {ok}건, 실패(null 유지) {fail}건')

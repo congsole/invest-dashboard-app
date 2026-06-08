@@ -25,7 +25,7 @@ import {
 export async function getSectors(): Promise<Sector[]> {
   const { data, error } = await supabase
     .from('sectors')
-    .select('*')
+    .select('id, code, name, name_en, parent_id, level')
     .order('id', { ascending: true });
 
   if (error) throw error;
@@ -42,7 +42,7 @@ export async function getStock(
 ): Promise<Stock | null> {
   const { data, error } = await supabase
     .from('stocks')
-    .select('*, sectors(id, code, name)')
+    .select('*, sectors(id, code, name, name_en, parent_id, level)')
     .eq('ticker', ticker)
     .eq('market', market)
     .maybeSingle();
@@ -54,7 +54,7 @@ export async function getStock(
 export async function searchStocks(query: string): Promise<Stock[]> {
   const { data, error } = await supabase
     .from('stocks')
-    .select('*, sectors(id, code, name)')
+    .select('*, sectors(id, code, name, name_en, parent_id, level)')
     .or(`ticker.ilike.%${query}%,name.ilike.%${query}%`)
     .eq('is_active', true)
     .order('name', { ascending: true })
@@ -95,7 +95,7 @@ export async function getMemo(memoId: string): Promise<MemoDetail> {
   const { data, error } = await supabase
     .from('memos')
     .select(
-      '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name))',
+      '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name, level))',
     )
     .eq('id', memoId)
     .single();
