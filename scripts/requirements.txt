@@ -1,0 +1,14 @@
+# 종목 배치 적재 스크립트 의존성 (PRD-004)
+# 설치: pip install -r scripts/requirements.txt
+
+# 한국 주식 종목 목록 (KOSPI/KOSDAQ, 시장 구분 포함)
+pykrx>=1.0.45
+
+# 섹터/업종 정보 (sector + industry → GICS 매핑)
+yfinance>=0.2.36
+
+# Supabase 클라이언트 (REST 호출 대용 — 현재 스크립트는 httpx 직접 사용)
+# supabase>=2.3.0
+
+# HTTP 클라이언트
+httpx>=0.27.0

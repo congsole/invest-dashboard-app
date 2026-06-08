@@ -9,29 +9,47 @@
  * 레이아웃 구조 (이슈 015):
  *   1행 (토글 행): 매매 이벤트 / 뉴스 연관 / 연결 없음 토글
  *   2행 (종목 행): "종목" 헤더 + 가로 스크롤 종목 칩
- *   3행 (섹터 행): "섹터" 헤더 + 가로 스크롤 섹터 칩
+ *   3행 (섹터 행): "섹터" 헤더 + L1 칩 나열, L1 탭 시 L2 칩 펼침
  *
- * 변경 사항 (이슈 015):
- *   - 단일 가로 스크롤 → 세 줄 구조로 재배치
- *   - "매매 연관" → "매매 이벤트" 레이블 변경
- *   - "연결 없음" 토글을 토글 행(1행)으로 이동
+ * 섹터 필터 동작 (이슈 022):
+ *   - L1 선택 → L1 id를 sectorIds에 즉시 추가 (L2 미로딩 상태도 가능)
+ *     RPC 재귀 CTE가 L1 하위 전체를 자동 포함하므로 L2 로딩 여부와 무관하게 동일 결과 보장
+ *   - L2 로딩 완료 후 → L2 id들을 sectorIds에 보충 추가 (L1 id 유지)
+ *   - L1 해제 → L1 id + 하위 L2 id 전체 제거
+ *   - L2 일부 선택 → L1 테두리만 색상 (partial)
+ *   - L2 전체 선택 → L1 배경 채움 (all)
+ *   - sectorIds에는 L1 id와 L2 id가 모두 저장됨
+ *
+ * [019] 필터 동작 확인:
+ *   - list_memos RPC가 "종목 경로 + 직접 연결 경로 OR 합산"으로 확장됨
+ *   - sectorIds에 L2 id를 보내면 RPC 내부에서 아래 두 경로를 합산:
+ *     1) 해당 L2 하위 종목에 연결된 메모 (종목 경로)
+ *     2) memo_sectors에 직접 L2/L3/L4로 연결된 메모 (직접 연결 경로)
+ *   - 프론트에서 별도 변경 없이 L3/L4로 직접 연결된 메모도 필터 결과에 포함됨
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
-import { MemoFilterState, ENTITY_COLORS, Sector } from '../types/memo';
+import { MemoFilterState, ENTITY_COLORS } from '../types/memo';
+import { Sector } from '../types/sector';
 
 interface MemoFilterProps {
   filter: MemoFilterState;
-  sectors: Sector[];
+  /** L1 섹터 목록 (getSectors({ level: 1 })로 조회) */
+  l1Sectors: Sector[];
+  /** L1별 L2 목록 맵 (key: L1 sector id, value: L2 sectors) */
+  l2SectorMap: Map<number, Sector[]>;
   onFilterChange: (updated: Partial<MemoFilterState>) => void;
   onStockPickerOpen: () => void;
+  /** L1 칩 펼침 시 호출 — 부모가 L2 목록을 지연 로딩함 */
+  onExpandL1?: (l1SectorId: number | null) => void;
 }
 
 interface FilterChipProps {
@@ -63,30 +81,128 @@ const FilterChip = React.memo(function FilterChip({
   );
 });
 
-// ── 섹터 필터 칩 (섹터 ID 캡처, onPress 안정화) ──
+// ── L1 섹터 칩 (펼침/접힘 상태 + 선택 상태 표시) ──
 
-interface SectorFilterChipProps {
+type L1SelectionState = 'none' | 'partial' | 'all';
+
+interface L1SectorChipProps {
+  sector: Sector;
+  /** L2 선택 상태: none=미선택, partial=일부, all=전체 */
+  selectionState: L1SelectionState;
+  /** 현재 expanded된 L1 id */
+  expandedL1Id: number | null;
+  onToggleExpand: (sectorId: number) => void;
+  onToggleSelect: (sectorId: number) => void;
+}
+
+const L1SectorChip = React.memo(function L1SectorChip({
+  sector,
+  selectionState,
+  expandedL1Id,
+  onToggleExpand,
+  onToggleSelect,
+}: L1SectorChipProps) {
+  const isExpanded = expandedL1Id === sector.id;
+  const isAll = selectionState === 'all';
+  const isPartial = selectionState === 'partial';
+
+  const handleExpand = useCallback(() => onToggleExpand(sector.id), [sector.id, onToggleExpand]);
+  const handleSelect = useCallback(() => onToggleSelect(sector.id), [sector.id, onToggleSelect]);
+
+  return (
+    <View
+      style={[
+        l1ChipStyles.wrapper,
+        isAll && { borderColor: ENTITY_COLORS.sector },
+        isPartial && { borderColor: ENTITY_COLORS.sector },
+      ]}
+    >
+      {/* 선택 영역 (좌측 탭) */}
+      <TouchableOpacity
+        style={[
+          l1ChipStyles.chip,
+          isAll
+            ? { backgroundColor: ENTITY_COLORS.sector }
+            : isPartial
+            ? l1ChipStyles.chipPartial
+            : l1ChipStyles.chipInactive,
+          isExpanded && selectionState === 'none' && l1ChipStyles.chipExpandedInactive,
+        ]}
+        onPress={handleSelect}
+        activeOpacity={0.8}
+      >
+        <Text
+          style={[
+            l1ChipStyles.chipText,
+            isAll
+              ? l1ChipStyles.chipTextActive
+              : isPartial
+              ? l1ChipStyles.chipTextPartial
+              : l1ChipStyles.chipTextInactive,
+          ]}
+        >
+          {sector.name}
+        </Text>
+      </TouchableOpacity>
+
+      {/* 펼침 버튼 (우측 화살표) */}
+      <TouchableOpacity
+        style={[
+          l1ChipStyles.expandBtn,
+          isAll
+            ? { backgroundColor: ENTITY_COLORS.sector, borderLeftColor: 'rgba(255,255,255,0.3)' }
+            : isPartial
+            ? { ...l1ChipStyles.expandBtnPartial, borderLeftColor: ENTITY_COLORS.sector }
+            : isExpanded
+            ? l1ChipStyles.expandBtnExpandedInactive
+            : l1ChipStyles.expandBtnInactive,
+        ]}
+        onPress={handleExpand}
+        activeOpacity={0.8}
+      >
+        <Text
+          style={[
+            l1ChipStyles.arrow,
+            (isAll || isPartial) && l1ChipStyles.arrowActive,
+          ]}
+        >
+          {isExpanded ? '▲' : '▼'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+// ── L2 섹터 칩 ──
+
+interface L2SectorChipProps {
   sector: Sector;
   active: boolean;
   onToggle: (sectorId: number) => void;
 }
 
-const SectorFilterChip = React.memo(function SectorFilterChip({
+const L2SectorChip = React.memo(function L2SectorChip({
   sector,
   active,
   onToggle,
-}: SectorFilterChipProps) {
-  const handlePress = useCallback(
-    () => onToggle(sector.id),
-    [sector.id, onToggle],
-  );
+}: L2SectorChipProps) {
+  const handlePress = useCallback(() => onToggle(sector.id), [sector.id, onToggle]);
   return (
-    <FilterChip
-      label={sector.name}
-      active={active}
-      color={ENTITY_COLORS.sector}
+    <TouchableOpacity
+      style={[
+        styles.chip,
+        styles.l2Chip,
+        active
+          ? { backgroundColor: ENTITY_COLORS.sector, borderColor: ENTITY_COLORS.sector }
+          : styles.chipInactive,
+      ]}
       onPress={handlePress}
-    />
+      activeOpacity={0.8}
+    >
+      <Text style={[styles.chipText, active ? styles.chipTextActive : styles.chipTextInactive]}>
+        {sector.name}
+      </Text>
+    </TouchableOpacity>
   );
 });
 
@@ -120,12 +236,83 @@ const SelectedStockChip = React.memo(function SelectedStockChip({
   );
 });
 
+// ── L2 칩 행 (펼쳐진 L1 하위) ──
+
+interface L2RowProps {
+  l2Sectors: Sector[];
+  selectedSectorIds: number[];
+  loading: boolean;
+  onToggle: (sectorId: number) => void;
+}
+
+const L2Row = React.memo(function L2Row({ l2Sectors, selectedSectorIds, loading, onToggle }: L2RowProps) {
+  if (loading) {
+    return (
+      <View style={[styles.l2Row, styles.l2RowLoading]}>
+        <ActivityIndicator size="small" color="#003ec7" />
+      </View>
+    );
+  }
+  if (l2Sectors.length === 0) return null;
+  return (
+    <View style={styles.l2Row}>
+      <Text style={styles.l2RowLabel}>▸</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {l2Sectors.map((sec) => (
+          <L2SectorChip
+            key={sec.id}
+            sector={sec}
+            active={selectedSectorIds.includes(sec.id)}
+            onToggle={onToggle}
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
+});
+
 export const MemoFilter = React.memo(function MemoFilter({
   filter,
-  sectors,
+  l1Sectors,
+  l2SectorMap,
   onFilterChange,
   onStockPickerOpen,
+  onExpandL1,
 }: MemoFilterProps) {
+  // 현재 expanded된 L1 sector id (하나만 펼침)
+  const [expandedL1Id, setExpandedL1Id] = React.useState<number | null>(null);
+
+  // L1별 선택 상태 계산
+  // - L2가 로딩된 경우: L2 선택 수 기반으로 none/partial/all 판단
+  // - L2가 아직 로딩 안 된 경우: L1 id가 sectorIds에 있으면 all, 없으면 none
+  const l1SelectionStates = useMemo(() => {
+    const states = new Map<number, L1SelectionState>();
+    for (const l1Sector of l1Sectors) {
+      const l1Id = l1Sector.id;
+      const l1Selected = filter.sectorIds.includes(l1Id);
+      const l2List = l2SectorMap.get(l1Id);
+
+      if (l2List === undefined) {
+        // L2 미로딩: L1 id 포함 여부로 판단
+        states.set(l1Id, l1Selected ? 'all' : 'none');
+        continue;
+      }
+      if (l2List.length === 0) {
+        states.set(l1Id, l1Selected ? 'all' : 'none');
+        continue;
+      }
+      const selectedL2Count = l2List.filter((s) => filter.sectorIds.includes(s.id)).length;
+      if (selectedL2Count === l2List.length) states.set(l1Id, 'all');
+      else if (selectedL2Count > 0 || l1Selected) states.set(l1Id, 'partial');
+      else states.set(l1Id, 'none');
+    }
+    return states;
+  }, [l1Sectors, l2SectorMap, filter.sectorIds]);
+
   const handleToggleTradeEvents = useCallback(() => {
     onFilterChange({ tradeEventsOnly: !filter.tradeEventsOnly, noLinks: false });
   }, [filter.tradeEventsOnly, onFilterChange]);
@@ -135,7 +322,6 @@ export const MemoFilter = React.memo(function MemoFilter({
   }, [filter.newsOnly, onFilterChange]);
 
   const handleToggleNoLinks = useCallback(() => {
-    // "연결 없음" 선택 시 다른 모든 필터 해제
     if (!filter.noLinks) {
       onFilterChange({
         noLinks: true,
@@ -151,27 +337,85 @@ export const MemoFilter = React.memo(function MemoFilter({
     }
   }, [filter.noLinks, onFilterChange]);
 
-  // 섹터 복수 선택 토글
-  const handleToggleSector = useCallback(
+  // L1 펼침/접힘 토글 (accordion: 다른 L1 펼치면 이전 L1 닫힘)
+  const handleToggleExpand = useCallback((sectorId: number) => {
+    setExpandedL1Id((prev) => {
+      const next = prev === sectorId ? null : sectorId;
+      onExpandL1?.(next);
+      return next;
+    });
+  }, [onExpandL1]);
+
+  // L1 칩 선택 토글
+  // - 선택: L1 id를 즉시 sectorIds에 추가. L2가 이미 로딩된 경우 L2 id들도 함께 추가.
+  // - 해제: L1 id + 하위 L2 id 전체 제거
+  const handleToggleL1Sector = useCallback(
+    (sectorId: number) => {
+      const currentState = l1SelectionStates.get(sectorId) ?? 'none';
+      const l2List = l2SectorMap.get(sectorId) ?? [];
+      const l2Ids = new Set(l2List.map((s) => s.id));
+
+      if (currentState !== 'none') {
+        // 해제: L1 id + 하위 L2 id 전체 제거
+        const removeIds = new Set([sectorId, ...l2Ids]);
+        const newIds = filter.sectorIds.filter((id) => !removeIds.has(id));
+        const newNames = filter.sectorNames.filter((_, i) => !removeIds.has(filter.sectorIds[i]));
+        onFilterChange({ sectorIds: newIds, sectorNames: newNames });
+      } else {
+        // 선택: L1 id를 즉시 추가. L2가 로딩된 경우 L2 id들도 함께 추가.
+        const existingIds = new Set(filter.sectorIds);
+        const idsToAdd: number[] = [];
+        const namesToAdd: string[] = [];
+
+        // L1 id 추가 (아직 없는 경우)
+        if (!existingIds.has(sectorId)) {
+          const l1Sector = l1Sectors.find((s) => s.id === sectorId);
+          idsToAdd.push(sectorId);
+          namesToAdd.push(l1Sector?.name ?? '');
+        }
+
+        // L2 id 추가 (로딩된 경우에만)
+        for (const l2 of l2List) {
+          if (!existingIds.has(l2.id)) {
+            idsToAdd.push(l2.id);
+            namesToAdd.push(l2.name);
+          }
+        }
+
+        onFilterChange({
+          sectorIds: [...filter.sectorIds, ...idsToAdd],
+          sectorNames: [...filter.sectorNames, ...namesToAdd],
+          noLinks: false,
+        });
+      }
+    },
+    [filter.sectorIds, filter.sectorNames, l1Sectors, l2SectorMap, l1SelectionStates, onFilterChange],
+  );
+
+  // L2 칩 선택 토글
+  const handleToggleL2Sector = useCallback(
     (sectorId: number) => {
       const currentIds = filter.sectorIds;
       const currentNames = filter.sectorNames;
       const idx = currentIds.indexOf(sectorId);
 
       if (idx >= 0) {
-        // 이미 선택된 섹터 → 해제
         const newIds = currentIds.filter((id) => id !== sectorId);
         const newNames = currentNames.filter((_, i) => i !== idx);
         onFilterChange({ sectorIds: newIds, sectorNames: newNames });
       } else {
-        // 새 섹터 추가 — noLinks 해제
-        const sector = sectors.find((s) => s.id === sectorId);
+        // L2 섹터 이름 찾기
+        let sectorName = '';
+        for (const [, l2List] of l2SectorMap) {
+          const found = l2List.find((s) => s.id === sectorId);
+          if (found) { sectorName = found.name; break; }
+        }
         const newIds = [...currentIds, sectorId];
-        const newNames = [...currentNames, sector?.name ?? ''];
+        const newNames = [...currentNames, sectorName];
         onFilterChange({ sectorIds: newIds, sectorNames: newNames, noLinks: false });
       }
     },
-    [filter.sectorIds, filter.sectorNames, sectors, onFilterChange],
+    [filter.sectorIds, filter.sectorNames, l2SectorMap, onFilterChange],
   );
 
   // 선택된 종목 개별 해제
@@ -186,12 +430,15 @@ export const MemoFilter = React.memo(function MemoFilter({
     [filter.stockIds, filter.stockNames, onFilterChange],
   );
 
-  const hasAnyFilter =
-    filter.stockIds.length > 0 ||
-    filter.tradeEventsOnly ||
-    filter.newsOnly ||
-    filter.sectorIds.length > 0 ||
-    filter.noLinks;
+  const hasAnyFilter = useMemo(
+    () =>
+      filter.stockIds.length > 0 ||
+      filter.tradeEventsOnly ||
+      filter.newsOnly ||
+      filter.sectorIds.length > 0 ||
+      filter.noLinks,
+    [filter],
+  );
 
   const handleClearAll = useCallback(() => {
     onFilterChange({
@@ -203,7 +450,16 @@ export const MemoFilter = React.memo(function MemoFilter({
       sectorNames: [],
       noLinks: false,
     });
+    setExpandedL1Id(null);
   }, [onFilterChange]);
+
+  // 현재 펼쳐진 L1의 L2 목록 및 로딩 상태
+  // l2SectorMap에 key가 없으면 아직 로딩 중(또는 에러)
+  const expandedL2Sectors = useMemo(
+    () => (expandedL1Id !== null ? (l2SectorMap.get(expandedL1Id) ?? []) : []),
+    [expandedL1Id, l2SectorMap],
+  );
+  const isL2Loading = expandedL1Id !== null && !l2SectorMap.has(expandedL1Id);
 
   return (
     <View style={styles.container}>
@@ -242,7 +498,6 @@ export const MemoFilter = React.memo(function MemoFilter({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {/* 선택된 종목 칩 (복수) */}
           {filter.stockIds.map((stockId, idx) => (
             <SelectedStockChip
               key={stockId}
@@ -251,8 +506,6 @@ export const MemoFilter = React.memo(function MemoFilter({
               onRemove={handleRemoveStock}
             />
           ))}
-
-          {/* 종목 추가 버튼 */}
           <TouchableOpacity
             style={[styles.chip, styles.chipInactive]}
             onPress={onStockPickerOpen}
@@ -265,7 +518,7 @@ export const MemoFilter = React.memo(function MemoFilter({
         </ScrollView>
       </View>
 
-      {/* 3행: 섹터 행 — 헤더 + 가로 스크롤 섹터 칩 */}
+      {/* 3행: 섹터 행 — L1 칩 나열 */}
       <View style={styles.filterRow}>
         <Text style={styles.rowLabel}>섹터</Text>
         <ScrollView
@@ -273,19 +526,31 @@ export const MemoFilter = React.memo(function MemoFilter({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {sectors.map((sec) => (
-            <SectorFilterChip
+          {l1Sectors.map((sec) => (
+            <L1SectorChip
               key={sec.id}
               sector={sec}
-              active={filter.sectorIds.includes(sec.id)}
-              onToggle={handleToggleSector}
+              selectionState={l1SelectionStates.get(sec.id) ?? 'none'}
+              expandedL1Id={expandedL1Id}
+              onToggleExpand={handleToggleExpand}
+              onToggleSelect={handleToggleL1Sector}
             />
           ))}
-          {sectors.length === 0 && (
+          {l1Sectors.length === 0 && (
             <Text style={styles.emptyRowText}>섹터 없음</Text>
           )}
         </ScrollView>
       </View>
+
+      {/* 4행 (조건부): 펼쳐진 L1의 L2 칩 행 (로딩 중이면 스피너 표시) */}
+      {expandedL1Id !== null && (isL2Loading || expandedL2Sectors.length > 0) && (
+        <L2Row
+          l2Sectors={expandedL2Sectors}
+          selectedSectorIds={filter.sectorIds}
+          loading={isL2Loading}
+          onToggle={handleToggleL2Sector}
+        />
+      )}
     </View>
   );
 });
@@ -310,6 +575,29 @@ const styles = StyleSheet.create({
     paddingLeft: 20,
     paddingVertical: 4,
   },
+  // 4행: L2 칩 행
+  l2Row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 20,
+    paddingVertical: 4,
+    backgroundColor: '#f3f6ff',
+    borderTopWidth: 1,
+    borderTopColor: '#e5eeff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5eeff',
+  },
+  l2RowLoading: {
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  l2RowLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#003ec7',
+    width: 16,
+    flexShrink: 0,
+  },
   rowLabel: {
     fontSize: 11,
     fontWeight: '700',
@@ -328,6 +616,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderWidth: 1.5,
+  },
+  l2Chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   chipInactive: {
     backgroundColor: '#ffffff',
@@ -359,5 +651,65 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9ca3af',
     paddingVertical: 8,
+  },
+});
+
+const l1ChipStyles = StyleSheet.create({
+  wrapper: {
+    flexDirection: 'row',
+    borderRadius: 9999,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: '#c3c5d9',
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  chipInactive: {
+    backgroundColor: '#ffffff',
+  },
+  chipPartial: {
+    backgroundColor: '#ffffff',
+  },
+  chipExpandedInactive: {
+    backgroundColor: '#eff4ff',
+  },
+  chipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  chipTextActive: {
+    color: '#ffffff',
+  },
+  chipTextPartial: {
+    color: ENTITY_COLORS.sector,
+  },
+  chipTextInactive: {
+    color: '#434656',
+  },
+  expandBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderLeftWidth: 1,
+    borderLeftColor: '#c3c5d9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expandBtnInactive: {
+    backgroundColor: '#ffffff',
+  },
+  expandBtnPartial: {
+    backgroundColor: '#ffffff',
+  },
+  expandBtnExpandedInactive: {
+    backgroundColor: '#eff4ff',
+  },
+  arrow: {
+    fontSize: 8,
+    color: '#737688',
+  },
+  arrowActive: {
+    color: '#ffffff',
   },
 });

@@ -5,6 +5,9 @@ export interface Sector {
   id: number;
   code: string;
   name: string;
+  name_en: string | null;
+  parent_id: number | null;
+  level: 1 | 2 | 3 | 4;
 }
 
 export interface Stock {
@@ -45,6 +48,8 @@ export interface MemoSector {
   sector_id: number;
   code: string;
   name: string;
+  name_en: string | null;
+  level: 1 | 2 | 3 | 4;
 }
 
 // ── 메모 목록 아이템 ──
@@ -97,6 +102,7 @@ export interface MemoDetail {
       id: number;
       code: string;
       name: string;
+      level: 1 | 2 | 3 | 4;
     };
   }>;
 }

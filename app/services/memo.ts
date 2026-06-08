@@ -25,7 +25,7 @@ import {
 export async function getSectors(): Promise<Sector[]> {
   const { data, error } = await supabase
     .from('sectors')
-    .select('*')
+    .select('id, code, name, name_en, parent_id, level')
     .order('id', { ascending: true });
 
   if (error) throw error;
@@ -42,7 +42,7 @@ export async function getStock(
 ): Promise<Stock | null> {
   const { data, error } = await supabase
     .from('stocks')
-    .select('*, sectors(id, code, name)')
+    .select('*, sectors(id, code, name, name_en, parent_id, level)')
     .eq('ticker', ticker)
     .eq('market', market)
     .maybeSingle();
@@ -54,7 +54,7 @@ export async function getStock(
 export async function searchStocks(query: string): Promise<Stock[]> {
   const { data, error } = await supabase
     .from('stocks')
-    .select('*, sectors(id, code, name)')
+    .select('*, sectors(id, code, name, name_en, parent_id, level)')
     .or(`ticker.ilike.%${query}%,name.ilike.%${query}%`)
     .eq('is_active', true)
     .order('name', { ascending: true })
@@ -95,7 +95,7 @@ export async function getMemo(memoId: string): Promise<MemoDetail> {
   const { data, error } = await supabase
     .from('memos')
     .select(
-      '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name))',
+      '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name, level))',
     )
     .eq('id', memoId)
     .single();
@@ -307,6 +307,7 @@ export async function unlinkMemoSector(memoId: string, sectorId: number): Promis
 // ────────────────────────────────────────────
 // 종목 등록 또는 조회 + 섹터 자동 추천 (RPC)
 // [012] get_or_recommend_stock_sector RPC로 변경
+// [016] p_naver_industry → p_yfinance_sector/p_yfinance_industry 변경
 // ────────────────────────────────────────────
 
 export interface GetOrRecommendStockInput {
@@ -314,7 +315,10 @@ export interface GetOrRecommendStockInput {
   p_market: 'KR' | 'US' | 'CRYPTO';
   p_name: string;
   p_currency: string;
-  p_naver_industry?: string | null;
+  /** yfinance sector 반환값 (예: "Technology"). L1 추천에 사용. */
+  p_yfinance_sector?: string | null;
+  /** yfinance industry 반환값 (예: "Semiconductor Manufacturing"). L4 추천에 사용. */
+  p_yfinance_industry?: string | null;
 }
 
 export interface GetOrRecommendStockResult {
@@ -329,6 +333,8 @@ export interface GetOrRecommendStockResult {
     id: number;
     code: string;
     name: string;
+    name_en: string | null;
+    level: number;
   } | null;
   is_new: boolean;
   created_at: string;
@@ -338,11 +344,12 @@ export async function getOrRecommendStockSector(
   input: GetOrRecommendStockInput,
 ): Promise<GetOrRecommendStockResult> {
   const { data, error } = await supabase.rpc('get_or_recommend_stock_sector', {
-    p_ticker:         input.p_ticker,
-    p_market:         input.p_market,
-    p_name:           input.p_name,
-    p_currency:       input.p_currency,
-    p_naver_industry: input.p_naver_industry ?? null,
+    p_ticker:            input.p_ticker,
+    p_market:            input.p_market,
+    p_name:              input.p_name,
+    p_currency:          input.p_currency,
+    p_yfinance_sector:   input.p_yfinance_sector ?? null,
+    p_yfinance_industry: input.p_yfinance_industry ?? null,
   });
 
   if (error) throw error;

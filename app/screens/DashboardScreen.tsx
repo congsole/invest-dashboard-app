@@ -15,7 +15,8 @@ import { KpiCardSection } from '../components/KpiCardSection';
 import { AssetHistoryChart } from '../components/AssetHistoryChart';
 import { HoldingCard } from '../components/HoldingCard';
 import { AccountEventBottomSheet } from '../components/AccountEventBottomSheet';
-import { AssetType, Period, HoldingCardData, KpiCardData } from '../types/dashboard';
+import { StockDetailSheet, assetTypeToMarket } from '../components/StockDetailSheet';
+import { AssetType, Period, HoldingCardData } from '../types/dashboard';
 import { supabase } from '../utils/supabase';
 
 // ────────────────────────────────────────────
@@ -62,6 +63,8 @@ export function DashboardScreen() {
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('month');
   const [sheetVisible, setSheetVisible] = useState(false);
+  // 종목 상세 시트
+  const [selectedHolding, setSelectedHolding] = useState<{ ticker: string; assetType: AssetType } | null>(null);
 
   const {
     kpi,
@@ -111,6 +114,18 @@ export function DashboardScreen() {
     setSheetVisible(false);
     refetch();
   }, [refetch]);
+
+  const handleHoldingPress = useCallback((item: HoldingCardData) => {
+    setSelectedHolding({ ticker: item.ticker, assetType: item.asset_type });
+  }, []);
+
+  const handleStockDetailClose = useCallback(() => {
+    setSelectedHolding(null);
+  }, []);
+
+  const handleSectorUpdated = useCallback(() => {
+    // 섹터 보정 후 대시보드 리프레시 (필요 시)
+  }, []);
 
   // ── 초기 로딩 화면 (마운트 최초 1회만) ──
   if (initialLoading) {
@@ -211,9 +226,14 @@ export function DashboardScreen() {
                   <Text style={styles.groupCount}>{group.items.length}개 종목</Text>
                 </View>
                 {group.items.map((item) => (
-                  <View key={item.ticker} style={styles.cardWrapper}>
+                  <TouchableOpacity
+                    key={item.ticker}
+                    style={styles.cardWrapper}
+                    onPress={() => handleHoldingPress(item)}
+                    activeOpacity={0.95}
+                  >
                     <HoldingCard data={item} />
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </View>
             ))
@@ -239,6 +259,17 @@ export function DashboardScreen() {
         onClose={() => setSheetVisible(false)}
         onSuccess={handleEventSuccess}
       />
+
+      {/* 종목 상세 시트 (섹터 breadcrumb + 보정) */}
+      {selectedHolding !== null && (
+        <StockDetailSheet
+          visible={true}
+          ticker={selectedHolding.ticker}
+          market={assetTypeToMarket(selectedHolding.assetType)}
+          onClose={handleStockDetailClose}
+          onSectorUpdated={handleSectorUpdated}
+        />
+      )}
     </SafeAreaView>
   );
 }

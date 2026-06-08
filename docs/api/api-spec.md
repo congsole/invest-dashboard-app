@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 6aab87b — 2026-06-04*
+*최종 업데이트: 4cb2f12 — 2026-06-08*
 
 ## 공통
 
@@ -948,21 +948,29 @@ ExchangeRate-API를 호출하여 USD/KRW 환율을 반환한다. 1시간 캐시.
 
 ### 섹터 목록 조회
 
-GICS 11개 + 가상자산 12개 고정 시드를 조회한다. 메모 작성 시 섹터 연결 선택, 종목 섹터 수동 지정, 필터 UI 구성 등에 사용한다.
+GICS 4단계 계층 구조(~273개)를 level 및 parent_id 필터로 조회한다. 메모 작성 시 섹터 연결 선택, 종목 섹터 수동 지정(cascading select), 필터 UI 구성 등에 사용한다.
 
 - **방식**: REST (auto-generated)
-- **호출**: `supabase.from('sectors').select('*').order('id', { ascending: true })`
+- **호출 (전체)**: `supabase.from('sectors').select('id, code, name, name_en, parent_id, level').order('id', { ascending: true })`
+- **호출 (특정 레벨)**: `supabase.from('sectors').select('id, code, name, name_en, parent_id, level').eq('level', level).order('id', { ascending: true })`
+- **호출 (특정 부모의 하위)**: `supabase.from('sectors').select('id, code, name, name_en, parent_id, level').eq('parent_id', parentId).order('id', { ascending: true })`
 - **인증**: 필요
 
-**요청 파라미터**
-없음
+**요청 파라미터 (쿼리)**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| level | `1 \| 2 \| 3 \| 4` | N | GICS 계층 레벨 필터. 미지정 시 전체 반환. 메모 필터 UI: level=1 또는 level=2만 사용. |
+| parent_id | number | N | 특정 상위 섹터의 직접 하위만 조회. cascading select에서 상위 선택 후 하위 목록 로딩에 사용. |
 
 **응답**
 ```typescript
 Array<{
-  id: number               // 1~12 고정
-  code: string             // 'IT' | 'HEALTHCARE' | 'FINANCIALS' | 'CONS_DISC' | 'CONS_STAPLES' | 'COMM' | 'INDUSTRIALS' | 'MATERIALS' | 'ENERGY' | 'UTILITIES' | 'REAL_ESTATE' | 'CRYPTO'
-  name: string             // '정보기술' | '헬스케어' | '금융' | '경기소비재' | '필수소비재' | '커뮤니케이션서비스' | '산업재' | '소재' | '에너지' | '유틸리티' | '부동산' | '가상자산'
+  id: number
+  code: string             // 예: 'IT', 'SEMICON_EQUIP', 'SEMICONDUCTORS', 'SEMI_MFG'
+  name: string             // 예: '정보기술', '반도체및반도체장비', '반도체', '반도체제조'
+  name_en: string | null   // 예: 'Information Technology', 'Semiconductor Manufacturing'
+  parent_id: number | null // L1은 null, L2~L4는 상위 섹터 ID
+  level: 1 | 2 | 3 | 4    // 1=Sector, 2=Industry Group, 3=Industry, 4=Sub-Industry
 }>
 ```
 
@@ -973,16 +981,50 @@ Array<{
 
 ---
 
+### 섹터 breadcrumb 조회 (RPC)
+
+특정 섹터 ID(보통 L4)에서 L1까지 조상 경로 전체를 한 번에 조회한다. 종목 상세 화면에서 `정보기술 > 반도체및반도체장비 > 반도체 > 반도체제조` 형태의 breadcrumb 표시에 사용한다. REST로 계층을 순차 조회할 경우 최대 4회 왕복이 필요하지만, 이 RPC는 1회 호출로 전체 경로를 반환한다.
+
+- **방식**: RPC (DB Function)
+- **호출**: `supabase.rpc('get_sector_breadcrumb', { p_sector_id })`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| p_sector_id | number | Y | 조상 경로를 조회할 섹터 ID (어떤 레벨이든 가능) |
+
+**응답**
+```typescript
+Array<{
+  id: number
+  code: string
+  name: string
+  name_en: string | null
+  level: 1 | 2 | 3 | 4
+}>
+// level 오름차순 정렬 (L1 → L2 → L3 → L4)
+// 예: [{ id:1, code:'IT', name:'정보기술', level:1 }, { id:13, code:'SEMICON_EQUIP', name:'반도체및반도체장비', level:2 }, ...]
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+| 404 | 해당 sector_id가 존재하지 않음 |
+
+---
+
 ## Stock (종목 마스터)
 
 > **RLS 정책**: `stocks`는 공개 마스터. 읽기는 인증된 사용자 전체 허용. 쓰기(INSERT/UPDATE/DELETE)는 service_role 전용 — 앱에서 종목 추가 시 FastAPI 서버를 경유하여 upsert한다.
 
 ### 로컬 종목 검색
 
-`stocks` 테이블에서 종목명 또는 티커로 ilike 검색한다. 검색어 2자 이상부터 호출하며, 디바운스 300ms를 권장한다. 결과가 0건이면 앱에서 외부 FastAPI 검색으로 자동 전환한다(외부 검색 API는 FastAPI 서버 엔드포인트이므로 이 명세 범위 외).
+`stocks` 테이블에서 종목명 또는 티커로 ilike 검색한다. 검색어 2자 이상부터 호출하며, 디바운스 300ms를 권장한다. 결과가 0건이면 앱에서 외부 FastAPI 검색으로 자동 전환한다(외부 검색 API는 FastAPI 서버 엔드포인트이므로 이 명세 범위 외). 섹터 join은 `sector_id`가 가리키는 단일 행만 포함한다(L4 또는 매핑 가능한 최하위 레벨).
 
 - **방식**: REST (auto-generated)
-- **호출**: `supabase.from('stocks').select('id, ticker, name, market, currency, sector_id, is_active, sectors(id, code, name)').or('ticker.ilike.%{q}%,name.ilike.%{q}%').eq('is_active', true).order('name', { ascending: true }).limit(30)`
+- **호출**: `supabase.from('stocks').select('id, ticker, name, market, currency, sector_id, is_active, sectors(id, code, name, name_en, parent_id, level)').or('ticker.ilike.%{q}%,name.ilike.%{q}%').eq('is_active', true).order('name', { ascending: true }).limit(30)`
 - **인증**: 필요
 
 **요청 파라미터 (쿼리)**
@@ -999,12 +1041,15 @@ Array<{
   name: string
   market: 'KR' | 'US' | 'CRYPTO'
   currency: string              // 'KRW' | 'USD'
-  sector_id: number | null
+  sector_id: number | null      // 가능한 한 L4(Sub-Industry), 매핑 실패 시 최하위 매핑 레벨
   is_active: boolean
   sectors: {
     id: number
     code: string
     name: string
+    name_en: string | null
+    parent_id: number | null
+    level: 1 | 2 | 3 | 4
   } | null
 }>
 ```
@@ -1018,10 +1063,10 @@ Array<{
 
 ### 종목 조회 (단건)
 
-ticker + market 조합으로 종목 단건을 조회한다.
+ticker + market 조합으로 종목 단건을 조회한다. 섹터 breadcrumb이 필요한 경우 `get_sector_breadcrumb` RPC를 별도 호출하거나, 아래 응답의 `sector_id`로 breadcrumb을 구성한다.
 
 - **방식**: REST (auto-generated)
-- **호출**: `supabase.from('stocks').select('*, sectors(id, code, name)').eq('ticker', ticker).eq('market', market).maybeSingle()`
+- **호출**: `supabase.from('stocks').select('*, sectors(id, code, name, name_en, parent_id, level)').eq('ticker', ticker).eq('market', market).maybeSingle()`
 - **인증**: 필요
 
 **요청 파라미터**
@@ -1038,16 +1083,21 @@ ticker + market 조합으로 종목 단건을 조회한다.
   name: string
   market: 'KR' | 'US' | 'CRYPTO'
   currency: string              // 'KRW' | 'USD'
-  sector_id: number | null
+  sector_id: number | null      // 가능한 한 L4(Sub-Industry), 매핑 실패 시 최하위 매핑 레벨
   is_active: boolean
   sectors: {
     id: number
     code: string
     name: string
+    name_en: string | null
+    parent_id: number | null
+    level: 1 | 2 | 3 | 4
   } | null
   created_at: string
 } | null
 ```
+
+> 종목 상세 화면에서 L4까지 breadcrumb(`정보기술 > 반도체및반도체장비 > 반도체 > 반도체제조`)을 표시할 때는 `get_sector_breadcrumb` RPC를 추가 호출한다.
 
 **에러 케이스**
 | 코드 | 상황 |
@@ -1058,10 +1108,18 @@ ticker + market 조합으로 종목 단건을 조회한다.
 
 ### 종목 등록 또는 조회 + 섹터 자동 추천 (RPC)
 
-종목을 `stocks` 테이블에 등록하고 섹터 자동 추천 결과를 함께 반환한다. 이미 등록된 종목이면 기존 레코드를 그대로 반환한다. 실제 upsert는 FastAPI 서버(service role)가 수행하며, 이 RPC는 앱에서 FastAPI 서버를 호출한 뒤 결과를 Supabase에서 재조회하는 흐름에서 쓰인다. 섹터 자동 추천 규칙: 미국 주식은 Yahoo Finance GICS 섹터 코드를 직접 매핑, 한국 주식은 `kr_sector_map`을 거쳐 GICS 변환, 암호화폐는 CRYPTO 고정.
+종목을 `stocks` 테이블에 등록하고 섹터 자동 추천 결과를 함께 반환한다. 이미 등록된 종목이면 기존 레코드를 그대로 반환한다. 실제 upsert는 FastAPI 서버(service role)가 수행하며, 이 RPC는 앱에서 FastAPI 서버를 호출한 뒤 결과를 Supabase에서 재조회하는 흐름에서 쓰인다.
+
+**섹터 자동 추천 규칙 (PRD-004 반영)**
+- 한국·미국 주식 모두 yfinance `sector`(L1) + `industry`(≒L3~L4) 기반 단일 경로.
+  1. `gics_yfinance_map` 테이블에서 yfinance `industry` 문자열 → GICS L4 조회.
+  2. 없으면 `sectors.name_en` 직접 매칭.
+  3. 매핑 실패 시 L1까지 확정, 하위는 null.
+- 암호화폐: CRYPTO 고정 (L1).
+- `kr_sector_map` 경유 로직 제거됨 (PRD-004).
 
 - **방식**: RPC (DB Function)
-- **호출**: `supabase.rpc('get_or_recommend_stock_sector', { p_ticker, p_market, p_name, p_currency, p_naver_industry })`
+- **호출**: `supabase.rpc('get_or_recommend_stock_sector', { p_ticker, p_market, p_name, p_currency, p_yfinance_sector, p_yfinance_industry })`
 - **인증**: 필요
 
 **요청 파라미터**
@@ -1071,7 +1129,8 @@ ticker + market 조합으로 종목 단건을 조회한다.
 | p_market | `'KR' \| 'US' \| 'CRYPTO'` | Y | 시장 구분 |
 | p_name | string | Y | 종목명 |
 | p_currency | string | Y | 거래 통화 (KRW / USD) |
-| p_naver_industry | string \| null | N | 한국 주식의 네이버 업종명. KR이고 null이면 섹터 추천 불가(null 반환). |
+| p_yfinance_sector | string \| null | N | yfinance `sector` 반환값 (예: "Technology"). null이면 L1 추천 불가. CRYPTO는 무시. |
+| p_yfinance_industry | string \| null | N | yfinance `industry` 반환값 (예: "Semiconductor Manufacturing"). null이면 L1까지만 추천. |
 
 **응답**
 ```typescript
@@ -1082,11 +1141,13 @@ ticker + market 조합으로 종목 단건을 조회한다.
   market: 'KR' | 'US' | 'CRYPTO'
   currency: string
   is_active: boolean
-  sector_id: number | null        // 자동 추천된 sector_id. 없으면 null.
+  sector_id: number | null        // 자동 추천된 sector_id (가능한 한 L4). 없으면 null.
   recommended_sector: {
     id: number
     code: string
     name: string
+    name_en: string | null
+    level: 1 | 2 | 3 | 4
   } | null                        // 자동 추천 섹터 정보. 추천 불가 시 null.
   is_new: boolean                 // true이면 신규 등록(FastAPI upsert 후 조회), false이면 기존 레코드
   created_at: string
@@ -1105,6 +1166,8 @@ ticker + market 조합으로 종목 단건을 조회한다.
 
 종목의 `sector_id`를 사용자가 직접 수정한다. 자동 추천 결과가 맞지 않을 때 보정에 사용한다. stocks 쓰기는 service_role 전용이므로 FastAPI 서버를 통해 호출해야 한다.
 
+UI는 L1 → L2 → L3 → L4 순차 cascading select로 구성한다. 각 단계 선택 시 해당 레벨의 하위 섹터 목록을 **섹터 목록 조회** REST API(`parent_id` 필터)로 로딩한다. 최종 선택된 레벨의 `sector_id`를 이 API에 전달한다.
+
 - **방식**: RPC (DB Function — service_role 경유)
 - **호출**: FastAPI `PATCH /stocks/{id}/sector` → Supabase service_role로 `stocks.update({ sector_id })`
 - **인증**: 필요 (앱 → FastAPI JWT 검증 → service_role로 Supabase 업데이트)
@@ -1113,7 +1176,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
 | id | string (uuid) | Y | 종목 ID |
-| sector_id | number \| null | Y | 변경할 섹터 ID. null이면 섹터 해제(미분류). |
+| sector_id | number \| null | Y | 변경할 섹터 ID (어떤 레벨이든 가능, 가능한 한 L4). null이면 섹터 해제(미분류). |
 
 **응답**
 ```typescript
@@ -1155,7 +1218,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
 | p_stocks | `Array<{ stock_id: string; goal_price: number \| null }>` | N | 연결할 종목 목록. 빈 배열 또는 미전달 시 연결 없음. |
 | p_trade_event_ids | `string[]` | N | 연결할 매매이벤트 ID 목록 (buy/sell event_type만 허용). |
 | p_news_ids | `string[]` | N | 연결할 뉴스 ID 목록. |
-| p_sector_ids | `number[]` | N | 연결할 섹터 ID 목록. |
+| p_sector_ids | `number[]` | N | 연결할 섹터 ID 목록. L1~L4 어느 레벨이든 가능. 메모 작성 시 L1→L2→L3→L4 cascading select로 원하는 단계까지 선택 후 전달. |
 
 **응답**
 ```typescript
@@ -1186,6 +1249,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
     sector_id: number
     code: string
     name: string
+    level: 1 | 2 | 3 | 4
   }>
 }
 ```
@@ -1210,6 +1274,22 @@ ticker + market 조합으로 종목 단건을 조회한다.
 
 종목 필터 시: 해당 종목에 직접 연결된 메모(`memo_stocks`)와 해당 종목의 매매이벤트에 연결된 메모(`memo_trade_events`)를 항상 함께 반환한다. "직접 연결만 보기" 토글은 제공하지 않으며, 종목 + 매매 연관 필터를 AND 결합하면 "매매이벤트에도 연결된 종목 관련 메모"만 조회할 수 있다.
 
+**섹터 필터 계층 탐색 규칙 (PRD-004 반영)**
+
+`p_sector_ids`에 지정된 섹터 ID는 어떤 레벨이든 가능하며, DB Function 내부에서 다음 **두 경로를 합산(OR)**하여 결과를 반환한다.
+
+1. **종목 경로**: 지정된 섹터의 하위 레벨에 속하는 종목(`stocks.sector_id`)과 연결된 메모(`memo_stocks` 경유).
+   - L1 지정 시: 해당 L1 섹터 및 그 하위 L2·L3·L4에 속하는 모든 종목과 연결된 메모 반환.
+   - L2 지정 시: 해당 L2 Industry Group 하위 L3·L4에 속하는 종목까지 포함.
+   - 탐색 방향: 재귀 CTE로 지정된 sector_id의 모든 하위 sector_id 집합을 구한 뒤 `stocks.sector_id IN (descendants)`로 판단.
+2. **직접 연결 경로**: `memo_sectors`로 지정된 섹터 **자신 및 하위 레벨**에 직접 연결된 메모.
+   - L1 "정보기술" 필터 시: `memo_sectors`에 **L1 자신(정보기술)**이 직접 연결된 메모 + L2·L3·L4 하위가 연결된 메모 모두 포함.
+   - L2 "반도체및반도체장비" 필터 시: `memo_sectors`에 L2 자신 + L3·L4 하위가 직접 연결된 메모 포함.
+
+> **핵심**: `p_sector_ids`에 L1 id가 포함되면, 종목과 연관되지 않고 L1 섹터에만 직접 연결된 메모도 필터 결과에 누락되지 않는다. RPC 내부 재귀 CTE가 L1 하위 전체를 자동으로 포함시키므로, 클라이언트가 L2를 아직 로딩하지 않은 상태에서 L1 id만 전달해도 동일한 필터 결과를 보장한다.
+
+메모 필터 UI에서는 L1·L2까지만 선택 가능하지만(PRD-004 §7.1), 데이터 레벨에서는 어떤 레벨이든 전달 가능.
+
 - **방식**: RPC (DB Function)
 - **호출**: `supabase.rpc('list_memos', { p_from, p_to, p_stock_ids, p_trade_events_only, p_news_only, p_sector_ids, p_no_links, p_limit, p_offset })`
 - **인증**: 필요
@@ -1222,7 +1302,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
 | p_stock_ids | string[] (uuid) \| null | N | 종목 필터. 지정된 종목들 중 하나라도 연관된 메모 반환 (OR). 직접 연결 및 매매이벤트 경유 연결 모두 포함. |
 | p_trade_events_only | boolean | N | true이면 매매이벤트에 연결된 메모만 반환 (기본 false). 다른 필터와 AND 결합. |
 | p_news_only | boolean | N | true이면 뉴스에 연결된 메모만 반환 (기본 false). 다른 필터와 AND 결합. |
-| p_sector_ids | number[] \| null | N | 섹터 필터. 지정된 섹터들 중 하나라도 연관된 메모 반환 (OR). 다른 타입 필터와 AND 결합. |
+| p_sector_ids | number[] \| null | N | 섹터 필터. 지정된 섹터들 중 하나라도 연관된 메모 반환 (OR). L1~L4 어느 레벨이든 가능. 종목 경로(해당 섹터 하위 종목에 연결된 메모) + 직접 연결 경로(memo_sectors로 해당 섹터 자신 및 하위 레벨에 직접 연결된 메모) OR 합산. L1 id만 전달해도 RPC 내부 재귀 CTE가 하위 전체를 포함하므로 L2 로딩 여부와 무관하게 동일한 필터 결과를 보장. 다른 타입 필터와 AND 결합. |
 | p_no_links | boolean | N | true이면 어떤 엔티티에도 연결되지 않은 메모만 반환 (기본 false). true 지정 시 다른 엔티티 필터는 무시. |
 | p_limit | number | N | 페이지 크기 (기본 20, 최대 100). |
 | p_offset | number | N | 페이지 오프셋 (기본 0). |
@@ -1256,6 +1336,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
       sector_id: number
       code: string
       name: string
+      level: 1 | 2 | 3 | 4
     }>
   }>
   total_count: number
@@ -1275,7 +1356,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
 메모 단건을 엔티티 연결 정보 포함하여 조회한다.
 
 - **방식**: REST (auto-generated)
-- **호출**: `supabase.from('memos').select('*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name))').eq('id', memoId).single()`
+- **호출**: `supabase.from('memos').select('*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name, level))').eq('id', memoId).single()`
 - **인증**: 필요
 
 **요청 파라미터**
@@ -1322,6 +1403,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
       id: number
       code: string
       name: string
+      level: 1 | 2 | 3 | 4
     }
   }>
 }
@@ -1352,7 +1434,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
 | p_stocks | `Array<{ stock_id: string; goal_price: number \| null }> \| null` | N | 종목 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 종목 연결 해제. |
 | p_trade_event_ids | `string[] \| null` | N | 매매이벤트 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 연결 해제. |
 | p_news_ids | `string[] \| null` | N | 뉴스 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 연결 해제. |
-| p_sector_ids | `number[] \| null` | N | 섹터 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 연결 해제. |
+| p_sector_ids | `number[] \| null` | N | 섹터 연결 전체 교체. null이면 변경하지 않음. 빈 배열이면 모든 연결 해제. L1~L4 어느 레벨이든 가능. |
 
 **응답**
 ```typescript
@@ -1383,6 +1465,7 @@ ticker + market 조합으로 종목 단건을 조회한다.
     sector_id: number
     code: string
     name: string
+    level: 1 | 2 | 3 | 4
   }>
 }
 ```
@@ -1471,7 +1554,7 @@ null  // 삭제 성공 시 데이터 없음
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
 | memo_id | string (uuid) | Y | 메모 ID |
-| sector_id | number | Y | 섹터 ID |
+| sector_id | number | Y | 섹터 ID. L1~L4 어느 레벨이든 가능. cascading select로 원하는 단계까지 선택 후 연결. |
 
 **공통 에러 케이스**
 | 코드 | 상황 |
@@ -1586,3 +1669,6 @@ null  // 삭제 성공 시 데이터 없음
 | [006] 종목 검색 기능 (78dfc50) | Stock — 로컬 종목 검색 API 신규 추가 (stocks 테이블 ilike 검색, market 필터 지원). 종목 조회(단건) 파라미터 `asset_type` → `market`('KR'/'US'/'CRYPTO')으로 변경, 응답에 `currency`, `is_active` 추가. 종목 등록+섹터자동추천 RPC 함수명 `upsert_stock_with_sector` → `get_or_recommend_stock_sector`로 변경, 파라미터 `p_asset_type` → `p_market` · `p_currency` 추가, 응답에 `market`/`currency`/`is_active` 반영. 종목 섹터 수동 지정/변경 방식 REST → FastAPI 경유(service_role)로 변경(stocks 쓰기는 service_role 전용 정책 반영). Memo 도메인 전체 응답의 stock 필드 `asset_type` → `market` 변경, memo_stocks join 응답에 `currency`/`is_active` 추가. |
 | [006] 메모 필터 기능 수정 (11f2f4c) | Memo — 메모 목록 조회(list_memos) RPC 변경: (1) `p_stock_id`(단건) → `p_stock_ids`(배열)로 변경하여 복수 종목 OR 필터 지원. (2) `p_include_trade_events` 파라미터 제거 — "직접 연결만 보기" 토글 폐지로 종목 필터는 직접 연결 + 매매이벤트 경유 연결을 항상 함께 반환. (3) `p_sector_id`(단건) → `p_sector_ids`(배열)로 변경하여 복수 섹터 OR 필터 지원. (4) RPC 호출 시그니처 업데이트. 필터 결합 규칙 설명 추가 (같은 타입 내 OR · 타입 간 AND · `p_no_links` 상호 배타적). |
 | [006] 메모 필터 UI 수정 (6aab87b) | API 시그니처 변경 없음. Memo — 메모 목록 조회(list_memos) 필터 결합 규칙 설명 표현 변경: "같은 타입 내 → OR, 타입 간 → AND" → "같은 행 내 → OR, 다른 행/타입 간 → AND" (PRD 필터 UI 세 줄 구조 반영). |
+| [007] 종목 분류 GICS 계층화 (b892f6d) | Sector — 섹터 목록 조회 응답에 `name_en`/`parent_id`/`level` 추가, `level`/`parent_id` 쿼리 파라미터 추가 (GICS 4단계 계층 지원). 섹터 breadcrumb 조회 RPC(`get_sector_breadcrumb`) 신규 추가. Stock — 로컬 종목 검색 및 단건 조회의 sectors join 응답에 `name_en`/`parent_id`/`level` 추가. 종목 조회(단건)에 breadcrumb 안내 주석 추가. 종목 등록+섹터자동추천 RPC(`get_or_recommend_stock_sector`) 변경: `p_naver_industry` 파라미터 제거, `p_yfinance_sector`/`p_yfinance_industry` 파라미터 추가 (kr_sector_map 참조 로직 제거, yfinance 단일 경로), 응답의 `recommended_sector`에 `name_en`/`level` 추가. 종목 섹터 수동 지정/변경에 cascading select 흐름 명세 추가. Memo — 메모 목록 조회(list_memos) 섹터 필터에 계층 탐색 규칙 추가 (L1 지정 시 하위 L2·L3·L4 종목 포함). |
+| [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | Memo — 메모 목록 조회(list_memos) 섹터 필터 계층 탐색 규칙 확장: 기존 "종목 경로"만 언급하던 것에서 "직접 연결 경로(memo_sectors)"까지 포함하는 두 경로 OR 합산으로 명확화. `p_sector_ids` 파라미터 설명 갱신. 메모 생성 RPC(`create_memo_with_links`) `p_sector_ids` 파라미터 설명에 L1~L4 어느 레벨이든 가능 및 cascading select 흐름 명시. 메모 수정 RPC(`update_memo_with_links`) `p_sector_ids` 파라미터 설명 동일하게 갱신. 섹터 연결 추가 단건 API `sector_id` 파라미터 설명에 레벨 제한 없음 및 cascading select 명시. 메모 생성·수정·목록 조회·상세 조회 응답의 `sectors` 배열에 `level` 필드 추가. 메모 상세 조회 REST 호출 구문의 memo_sectors select에 `level` 컬럼 추가. |
+| [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | API 시그니처 변경 없음. Memo — 메모 목록 조회(list_memos) 섹터 필터 계층 탐색 규칙 수정: 직접 연결 경로를 "지정된 섹터 자신 및 하위 레벨"로 명확화 (기존: "하위 레벨만"), L1 자신에 직접 연결된 메모 포함 예시 추가. 핵심 보장 추가: L1 id만 전달해도 RPC 재귀 CTE가 하위 전체를 포함하므로 L2 로딩 여부와 무관하게 동일한 필터 결과 보장. `p_sector_ids` 파라미터 설명에 "자신 및 하위 레벨" 직접 연결 경로 보장 및 L1 id 단독 전달 시 동작 명시. |

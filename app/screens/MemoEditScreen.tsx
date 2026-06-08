@@ -12,9 +12,14 @@
  * - 로컬 → 외부 자동전환 검색
  * - "추가" 칩으로 외부 검색 결과 구분
  * - sector_id null 시 섹터 선택 드롭다운 자동 노출
+ *
+ * [019] 섹터 연결 L1~L4 cascading multi-select로 변경:
+ * - CascadingSectorMultiPicker 사용
+ * - L1~L4 어느 레벨이든 선택 가능
+ * - 선택된 섹터는 selectedSectors 배열로 관리
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -28,10 +33,11 @@ import {
 } from 'react-native';
 import { useMemoDetail } from '../hooks/useMemoDetail';
 import { useMemoMutation } from '../hooks/useMemoMutation';
-import { getSectors } from '../services/memo';
-import { Sector, MemoStockInput, ENTITY_COLORS } from '../types/memo';
+import { Sector } from '../types/sector';
+import { MemoStockInput, ENTITY_COLORS } from '../types/memo';
 import { EntityChip } from '../components/EntityChip';
 import { StockSearchModal, SelectedStockInfo } from '../components/StockSearchModal';
+import { CascadingSectorMultiPicker } from '../components/CascadingSectorPicker';
 
 // ────────────────────────────────────────────
 // 연결 종목 상태 (goal_price 포함)
@@ -68,14 +74,9 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
 
   const [body, setBody] = useState('');
   const [selectedStocks, setSelectedStocks] = useState<SelectedStock[]>([]);
-  const [selectedSectorIds, setSelectedSectorIds] = useState<number[]>([]);
-  const [sectors, setSectors] = useState<Sector[]>([]);
+  // [019] 섹터 연결: sector id 배열 대신 Sector 객체 배열로 관리 (레벨 표시 등 메타 활용)
+  const [selectedSectors, setSelectedSectors] = useState<Sector[]>([]);
   const [stockModalVisible, setStockModalVisible] = useState(false);
-
-  // 섹터 목록 로드
-  useEffect(() => {
-    getSectors().then(setSectors).catch(() => {});
-  }, []);
 
   // 편집 모드: 기존 데이터 로드
   useEffect(() => {
@@ -98,7 +99,17 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
         goal_price: ms.goal_price !== null ? String(ms.goal_price) : '',
       })),
     );
-    setSelectedSectorIds(existingMemo.memo_sectors.map((ms) => ms.sector_id));
+    // [019] memo_sectors → Sector 객체로 변환 (level 포함)
+    setSelectedSectors(
+      existingMemo.memo_sectors.map((ms) => ({
+        id: ms.sector_id,
+        code: ms.sectors.code,
+        name: ms.sectors.name,
+        name_en: null,
+        parent_id: null,
+        level: ms.sectors.level,
+      })),
+    );
   }, [existingMemo]);
 
   // ── 종목 선택 (StockSearchModal 콜백) ──
@@ -130,12 +141,19 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
     );
   }, []);
 
-  // ── 섹터 토글 ──
-  const handleSectorToggle = useCallback((sectorId: number) => {
-    setSelectedSectorIds((prev) =>
-      prev.includes(sectorId) ? prev.filter((id) => id !== sectorId) : [...prev, sectorId],
-    );
+  // ── 섹터 토글 (CascadingSectorMultiPicker 콜백) ──
+  const handleSectorToggle = useCallback((sector: Sector) => {
+    setSelectedSectors((prev) => {
+      const exists = prev.some((s) => s.id === sector.id);
+      return exists ? prev.filter((s) => s.id !== sector.id) : [...prev, sector];
+    });
   }, []);
+
+  // p_sector_ids: selectedSectors에서 id 배열 추출
+  const selectedSectorIds = useMemo(
+    () => selectedSectors.map((s) => s.id),
+    [selectedSectors],
+  );
 
   // ── 저장 ──
   const handleSave = useCallback(async () => {
@@ -283,28 +301,45 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
           )}
         </View>
 
-        {/* 섹터 연결 */}
+        {/* 섹터 연결 — [019] L1~L4 cascading multi-select */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>섹터 연결</Text>
-          <View style={styles.sectorChips}>
-            {sectors.map((sec) => {
-              const isSelected = selectedSectorIds.includes(sec.id);
-              return (
-                <TouchableOpacity
-                  key={sec.id}
-                  style={[
-                    styles.sectorChip,
-                    isSelected && styles.sectorChipActive,
-                  ]}
-                  onPress={() => handleSectorToggle(sec.id)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.sectorChipText, isSelected && styles.sectorChipTextActive]}>
-                    {sec.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionLabel}>섹터 연결</Text>
+            {selectedSectors.length > 0 && (
+              <Text style={styles.sectorHint}>
+                {selectedSectors.length}개 선택됨
+              </Text>
+            )}
+          </View>
+
+          {/* 선택된 섹터 목록 (레벨 배지 표시) */}
+          {selectedSectors.length > 0 && (
+            <View style={styles.selectedSectorList}>
+              {selectedSectors.map((sec) => (
+                <View key={sec.id} style={styles.selectedSectorItem}>
+                  <View style={styles.selectedSectorLeft}>
+                    <View style={styles.levelBadge}>
+                      <Text style={styles.levelBadgeText}>L{sec.level}</Text>
+                    </View>
+                    <Text style={styles.selectedSectorName}>{sec.name}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.removeBtn}
+                    onPress={() => handleSectorToggle(sec)}
+                  >
+                    <Text style={styles.removeBtnText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Cascading Picker */}
+          <View style={styles.pickerContainer}>
+            <CascadingSectorMultiPicker
+              selectedSectors={selectedSectors}
+              onToggle={handleSectorToggle}
+            />
           </View>
         </View>
 
@@ -494,30 +529,55 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0b1c30',
   },
-  sectorChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  sectorChip: {
-    borderRadius: 9999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderWidth: 1.5,
-    borderColor: '#c3c5d9',
-    backgroundColor: '#ffffff',
-  },
-  sectorChipActive: {
-    backgroundColor: ENTITY_COLORS.sector,
-    borderColor: ENTITY_COLORS.sector,
-  },
-  sectorChipText: {
+  // [019] 섹터 연결 — cascading picker 영역
+  sectorHint: {
     fontSize: 12,
+    color: ENTITY_COLORS.sector,
     fontWeight: '600',
-    color: '#434656',
   },
-  sectorChipTextActive: {
-    color: '#ffffff',
+  selectedSectorList: {
+    gap: 6,
+  },
+  selectedSectorItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e5eeff',
+  },
+  selectedSectorLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  levelBadge: {
+    backgroundColor: '#dce9ff',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  levelBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#003ec7',
+  },
+  selectedSectorName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0b1c30',
+    flex: 1,
+  },
+  pickerContainer: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e5eeff',
   },
   errorBox: {
     backgroundColor: '#ffdad6',

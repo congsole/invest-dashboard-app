@@ -28,7 +28,7 @@ function buildChips(memo: MemoItem): Array<{ entityType: EntityType; label: stri
   const chips: Array<{ entityType: EntityType; label: string; key: string }> = [];
 
   for (const s of memo.stocks) {
-    chips.push({ entityType: 'stock', label: s.ticker, key: `stock-${s.stock_id}` });
+    chips.push({ entityType: 'stock', label: s.name, key: `stock-${s.stock_id}` });
   }
   for (const te of memo.trade_events) {
     const label = te.ticker ? `${te.event_type === 'buy' ? '매수' : '매도'} ${te.ticker}` : te.event_type === 'buy' ? '매수' : '매도';
@@ -38,7 +38,9 @@ function buildChips(memo: MemoItem): Array<{ entityType: EntityType; label: stri
     chips.push({ entityType: 'news', label: '뉴스', key: `news-${n.news_id}` });
   }
   for (const sec of memo.sectors) {
-    chips.push({ entityType: 'sector', label: sec.name, key: `sec-${sec.sector_id}` });
+    // [019] L2~L4 섹터는 레벨 배지를 접두어로 표시
+    const label = sec.level > 1 ? `L${sec.level} ${sec.name}` : sec.name;
+    chips.push({ entityType: 'sector', label, key: `sec-${sec.sector_id}` });
   }
 
   if (chips.length === 0) {
