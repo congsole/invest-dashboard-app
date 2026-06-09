@@ -3,7 +3,10 @@
  *
  * - 달력형 / 리스트형 전환 토글
  * - 필터 (종목/매매이벤트/뉴스/섹터/연결 없음, AND 결합)
- * - 렌더링 최적화: initialLoading(초기), refreshing(당김 새로고침) 분리
+ * - 렌더링 최적화:
+ *   - initialLoading(초기), refreshing(당김 새로고침) 분리
+ *   - 필터 상태를 MemoFilterSection으로 분리 → 필터 변경 시 FlatList/CalendarView 리렌더링 방지
+ *   - viewMode/calYear/calMonth는 ref로 MemoFilterSection에 전달 (안정적 참조)
  */
 
 import React, {useCallback, useEffect, useRef, useState} from 'react';
@@ -197,34 +200,162 @@ const pickerStyles = StyleSheet.create({
 });
 
 // ────────────────────────────────────────────
+// MemoFilterSection — 필터 상태를 소유하는 컴포넌트
+// 필터 변경이 MemoListScreen 리렌더링을 유발하지 않도록 격리
+// ────────────────────────────────────────────
+
+interface MemoFilterSectionProps {
+  /** 부모가 소유하는 filter ref — 여기서 쓰고 부모가 읽음 */
+  filterRef: React.MutableRefObject<MemoFilterState>;
+  fetchMemos: (params: ListMemosParams) => Promise<void>;
+  viewModeRef: React.MutableRefObject<ViewMode>;
+  calYearRef: React.MutableRefObject<number>;
+  calMonthRef: React.MutableRefObject<number>;
+}
+
+const MemoFilterSection = React.memo(function MemoFilterSection({
+  filterRef,
+  fetchMemos,
+  viewModeRef,
+  calYearRef,
+  calMonthRef,
+}: MemoFilterSectionProps) {
+  const [filter, setFilter] = useState<MemoFilterState>(DEFAULT_FILTER_STATE);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [l2SectorMap, setL2SectorMap] = useState<Map<number, Sector[]>>(new Map());
+  const [stockPickerVisible, setStockPickerVisible] = useState(false);
+  const loadedL1IdsRef = useRef<Set<number>>(new Set());
+
+  // filterRef 동기화 — 부모(MemoListScreen)가 현재 필터를 읽을 수 있도록
+  useEffect(() => {
+    filterRef.current = filter;
+  }, [filter, filterRef]);
+
+  // L1 섹터 목록 로드
+  useEffect(() => {
+    getSectors({ level: 1 }).then(setSectors).catch(() => {});
+  }, []);
+
+  // fetch를 현재 필터 + 뷰모드에 맞게 호출하는 헬퍼
+  const fetchWithFilter = useCallback(
+    (filterState: MemoFilterState) => {
+      const params = filterToParams(filterState);
+      if (viewModeRef.current === 'calendar') {
+        const { from, to } = getMonthRange(calYearRef.current, calMonthRef.current);
+        fetchMemos({ ...params, p_from: from, p_to: to });
+      } else {
+        fetchMemos(params);
+      }
+    },
+    [fetchMemos, viewModeRef, calYearRef, calMonthRef],
+  );
+
+  const handleFilterChange = useCallback(
+    (updated: Partial<MemoFilterState>) => {
+      const newFilter = { ...filterRef.current, ...updated };
+      filterRef.current = newFilter;
+      setFilter(newFilter);
+      fetchWithFilter(newFilter);
+    },
+    [filterRef, fetchWithFilter],
+  );
+
+  const handleStockSelect = useCallback(
+    (stock: Stock) => {
+      const current = filterRef.current;
+      if (current.stockIds.includes(stock.id)) return;
+      const newIds = [...current.stockIds, stock.id];
+      const newNames = [...current.stockNames, stock.name];
+      handleFilterChange({ stockIds: newIds, stockNames: newNames, noLinks: false });
+    },
+    [filterRef, handleFilterChange],
+  );
+
+  const handleStockPickerOpen = useCallback(() => setStockPickerVisible(true), []);
+  const handleStockPickerClose = useCallback(() => setStockPickerVisible(false), []);
+
+  const handleExpandL1 = useCallback(
+    async (l1SectorId: number | null) => {
+      if (l1SectorId === null) return;
+      if (loadedL1IdsRef.current.has(l1SectorId)) return;
+      try {
+        const l2List = await getSectors({ level: 2, parent_id: l1SectorId });
+        loadedL1IdsRef.current.add(l1SectorId);
+        setL2SectorMap((prev) => {
+          const next = new Map(prev);
+          next.set(l1SectorId, l2List);
+          return next;
+        });
+
+        // L2 로딩 완료 후: L1이 이미 선택된 상태라면 L2 id들을 sectorIds에 보충 추가
+        setFilter((prevFilter) => {
+          const isL1Selected = prevFilter.sectorIds.includes(l1SectorId);
+          if (!isL1Selected || l2List.length === 0) return prevFilter;
+
+          const existingIds = new Set(prevFilter.sectorIds);
+          const idsToAdd = l2List.filter((s) => !existingIds.has(s.id));
+          if (idsToAdd.length === 0) return prevFilter;
+
+          const updated = {
+            ...prevFilter,
+            sectorIds: [...prevFilter.sectorIds, ...idsToAdd.map((s) => s.id)],
+            sectorNames: [...prevFilter.sectorNames, ...idsToAdd.map((s) => s.name)],
+          };
+          filterRef.current = updated;
+          return updated;
+        });
+      } catch {
+        // L2 로딩 실패는 무시
+      }
+    },
+    [filterRef],
+  );
+
+  return (
+    <>
+      <MemoFilter
+        filter={filter}
+        l1Sectors={sectors}
+        l2SectorMap={l2SectorMap}
+        onFilterChange={handleFilterChange}
+        onStockPickerOpen={handleStockPickerOpen}
+        onExpandL1={handleExpandL1}
+      />
+      <StockPickerModal
+        visible={stockPickerVisible}
+        onClose={handleStockPickerClose}
+        onSelect={handleStockSelect}
+      />
+    </>
+  );
+});
+
+// ────────────────────────────────────────────
 // MemoListScreen
 // ────────────────────────────────────────────
+
+const MemoListSeparator = () => <View style={styles.separator} />;
 
 export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) {
   const today = new Date();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [calYear, setCalYear] = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth() + 1);
-  const [filter, setFilter] = useState<MemoFilterState>(DEFAULT_FILTER_STATE);
-  // L1 섹터 목록
-  const [sectors, setSectors] = useState<Sector[]>([]);
-  const [stockPickerVisible, setStockPickerVisible] = useState(false);
 
   const { allMemos, calendarSummary, initialLoading, refreshing, loadingMore, error, fetch, refresh, loadMore, hasMore } = useMemos();
 
-  // filter 최신값을 ref로 추적 (handleFilterChange 의존성 최소화)
-  const filterRef = useRef(filter);
-  filterRef.current = filter;
+  // MemoFilterSection과 공유하는 refs (안정적 참조)
+  const filterRef = useRef<MemoFilterState>(DEFAULT_FILTER_STATE);
+  const viewModeRef = useRef<ViewMode>(viewMode);
+  viewModeRef.current = viewMode;
+  const calYearRef = useRef(calYear);
+  calYearRef.current = calYear;
+  const calMonthRef = useRef(calMonth);
+  calMonthRef.current = calMonth;
 
-  // L2 섹터 맵 (key: L1 sector id → value: L2 sectors)
-  // L1 칩 탭 시 해당 L1의 L2를 지연 로딩
-  const [l2SectorMap, setL2SectorMap] = useState<Map<number, Sector[]>>(new Map());
-  const loadedL1IdsRef = useRef<Set<number>>(new Set());
-
-  // 초기 로드: L1 섹터 목록만 가져옴
+  // 초기 로드
   useEffect(() => {
-    fetch(filterToParams(filter));
-    getSectors({ level: 1 }).then(setSectors).catch(() => {});
+    fetch(filterToParams(filterRef.current));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetch]);
 
@@ -236,21 +367,6 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calYear, calMonth, viewMode, fetch]);
-
-  const handleFilterChange = useCallback(
-    (updated: Partial<MemoFilterState>) => {
-      const newFilter = { ...filterRef.current, ...updated };
-      setFilter(newFilter);
-      const params = filterToParams(newFilter);
-      if (viewMode === 'calendar') {
-        const { from, to } = getMonthRange(calYear, calMonth);
-        fetch({ ...params, p_from: from, p_to: to });
-      } else {
-        fetch(params);
-      }
-    },
-    [viewMode, calYear, calMonth, fetch],
-  );
 
   const handleViewModeToggle = useCallback(() => {
     const next: ViewMode = viewMode === 'list' ? 'calendar' : 'list';
@@ -284,11 +400,9 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
 
   const handleDayPress = useCallback(
     (date: string) => {
-      // 해당 날의 메모가 있으면 리스트 뷰로 전환 후 해당 날짜 필터
       const summary = calendarSummary.get(date);
       if (summary && summary.memoIds.length > 0) {
         setViewMode('list');
-        // 날짜 기반 필터는 서버 파라미터로 처리
         fetch({ ...filterToParams(filterRef.current), p_from: date, p_to: date });
       }
     },
@@ -300,65 +414,6 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
       onMemoPress(memo.id);
     },
     [onMemoPress],
-  );
-
-  const handleStockSelect = useCallback(
-    (stock: Stock) => {
-      const current = filterRef.current;
-      // 이미 선택된 종목이면 무시 (중복 추가 방지)
-      if (current.stockIds.includes(stock.id)) return;
-      const newIds = [...current.stockIds, stock.id];
-      const newNames = [...current.stockNames, stock.name];
-      handleFilterChange({ stockIds: newIds, stockNames: newNames, noLinks: false });
-    },
-    [handleFilterChange],
-  );
-
-  const handleStockPickerOpen = useCallback(() => setStockPickerVisible(true), []);
-
-  // L1 칩 펼침 시 해당 L1의 L2 목록을 지연 로딩
-  // MemoFilter에서 expandedL1Id가 변경될 때 호출되는 콜백 대신,
-  // l2SectorMap을 MemoListScreen에서 관리하고 MemoFilter에 전달한다.
-  // L1 칩의 펼침 버튼이 눌릴 때 트리거: MemoFilter 내에서 expandedL1Id 변경 시
-  // MemoFilter는 expandedL1Id를 내부 상태로 관리하지만, L2 로딩은 부모에서 처리할 수 없음.
-  // 따라서 L2 지연 로딩을 위해 onExpandL1 콜백을 MemoFilter에 추가 전달한다.
-  const handleExpandL1 = useCallback(
-    async (l1SectorId: number | null) => {
-      if (l1SectorId === null) return;
-      // 이미 로딩된 L1은 재요청하지 않음
-      if (loadedL1IdsRef.current.has(l1SectorId)) return;
-      try {
-        const l2List = await getSectors({ level: 2, parent_id: l1SectorId });
-        loadedL1IdsRef.current.add(l1SectorId);
-        setL2SectorMap((prev) => {
-          const next = new Map(prev);
-          next.set(l1SectorId, l2List);
-          return next;
-        });
-
-        // L2 로딩 완료 후: L1이 이미 선택된 상태라면 L2 id들을 sectorIds에 보충 추가
-        // (L1 id만으로 RPC가 올바른 결과를 반환하지만, UI 표시를 위해 L2 id도 저장)
-        setFilter((prevFilter) => {
-          const isL1Selected = prevFilter.sectorIds.includes(l1SectorId);
-          if (!isL1Selected || l2List.length === 0) return prevFilter;
-
-          const existingIds = new Set(prevFilter.sectorIds);
-          const idsToAdd = l2List.filter((s) => !existingIds.has(s.id));
-          if (idsToAdd.length === 0) return prevFilter;
-
-          // 필터 변경 시 RPC 재호출은 하지 않음 — L1 id만으로 동일 결과 보장
-          // (handleFilterChange를 쓰면 불필요한 fetch가 발생하므로 setFilter만 호출)
-          return {
-            ...prevFilter,
-            sectorIds: [...prevFilter.sectorIds, ...idsToAdd.map((s) => s.id)],
-            sectorNames: [...prevFilter.sectorNames, ...idsToAdd.map((s) => s.name)],
-          };
-        });
-      } catch {
-        // L2 로딩 실패는 무시 (L1 선택만으로도 필터 가능)
-      }
-    },
-    [],
   );
 
   const renderMemoItem = useCallback(
@@ -376,6 +431,8 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
       </View>
     );
   }, [loadingMore]);
+
+  const keyExtractor = useCallback((item: MemoItem) => item.id, []);
 
   const renderEmpty = useCallback(() => {
     if (initialLoading) return null;
@@ -409,14 +466,13 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
         </TouchableOpacity>
       </View>
 
-      {/* 필터 */}
-      <MemoFilter
-        filter={filter}
-        l1Sectors={sectors}
-        l2SectorMap={l2SectorMap}
-        onFilterChange={handleFilterChange}
-        onStockPickerOpen={handleStockPickerOpen}
-        onExpandL1={handleExpandL1}
+      {/* 필터 (자체 상태 소유 — 필터 변경이 MemoListScreen 리렌더링을 유발하지 않음) */}
+      <MemoFilterSection
+        filterRef={filterRef}
+        fetchMemos={fetch}
+        viewModeRef={viewModeRef}
+        calYearRef={calYearRef}
+        calMonthRef={calMonthRef}
       />
 
       {/* 에러 배너 */}
@@ -455,7 +511,7 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
       {viewMode === 'list' && (
         <FlatList
           data={allMemos}
-          keyExtractor={(item) => item.id}
+          keyExtractor={keyExtractor}
           renderItem={renderMemoItem}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -466,7 +522,7 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
           ListFooterComponent={renderFooter}
           onEndReached={hasMore ? loadMore : undefined}
           onEndReachedThreshold={0.3}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ItemSeparatorComponent={MemoListSeparator}
         />
       )}
 
@@ -474,13 +530,6 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
       <TouchableOpacity style={styles.fab} onPress={onAddMemo} activeOpacity={0.85}>
         <Text style={styles.fabIcon}>+</Text>
       </TouchableOpacity>
-
-      {/* 종목 검색 모달 */}
-      <StockPickerModal
-        visible={stockPickerVisible}
-        onClose={() => setStockPickerVisible(false)}
-        onSelect={handleStockSelect}
-      />
     </SafeAreaView>
   );
 }

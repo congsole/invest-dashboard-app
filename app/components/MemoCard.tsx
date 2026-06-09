@@ -4,7 +4,7 @@
  * 본문 미리보기 + 작성 일시 + 연결 엔티티 칩을 표시한다.
  */
 
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { MemoItem, EntityType } from '../types/memo';
 import { EntityChip } from './EntityChip';
@@ -51,12 +51,13 @@ function buildChips(memo: MemoItem): Array<{ entityType: EntityType; label: stri
 }
 
 export const MemoCard = React.memo(function MemoCard({ memo, onPress }: MemoCardProps) {
-  const chips = buildChips(memo);
+  const chips = useMemo(() => buildChips(memo), [memo]);
+  const handlePress = useCallback(() => onPress(memo), [memo, onPress]);
 
   return (
     <TouchableOpacity
       style={styles.card}
-      onPress={() => onPress(memo)}
+      onPress={handlePress}
       activeOpacity={0.85}
     >
       {/* 본문 미리보기 */}

@@ -84,7 +84,10 @@ export function useMemos(initialParams: ListMemosParams = {}): UseMemosReturn {
 
   const paramsRef = useRef<ListMemosParams>(initialParams);
   const offsetRef = useRef(0);
+  const totalCountRef = useRef(0);
+  const loadingMoreRef = useRef(false);
   const isMounted = useRef(true);
+  const hasFetchedRef = useRef(false);
 
   useEffect(() => {
     isMounted.current = true;
@@ -96,8 +99,12 @@ export function useMemos(initialParams: ListMemosParams = {}): UseMemosReturn {
   const fetch = useCallback(async (params: ListMemosParams = {}) => {
     paramsRef.current = { ...params };
     offsetRef.current = 0;
-    setInitialLoading(true);
+
+    // initialLoading은 최초 fetch에만 — 이후 재조회는 기존 데이터를 유지
+    const isInitial = !hasFetchedRef.current;
+    if (isInitial) setInitialLoading(true);
     setError(null);
+
     try {
       const result = await listMemos({
         ...paramsRef.current,
@@ -105,14 +112,16 @@ export function useMemos(initialParams: ListMemosParams = {}): UseMemosReturn {
         p_offset: 0,
       });
       if (!isMounted.current) return;
+      hasFetchedRef.current = true;
       setAllMemos(result.memos);
       setTotalCount(result.total_count);
+      totalCountRef.current = result.total_count;
       offsetRef.current = result.memos.length;
     } catch (e) {
       if (!isMounted.current) return;
       setError(e instanceof Error ? e.message : '메모 목록을 불러오지 못했습니다');
     } finally {
-      if (isMounted.current) setInitialLoading(false);
+      if (isMounted.current && isInitial) setInitialLoading(false);
     }
   }, []);
 
@@ -129,6 +138,7 @@ export function useMemos(initialParams: ListMemosParams = {}): UseMemosReturn {
       if (!isMounted.current) return;
       setAllMemos(result.memos);
       setTotalCount(result.total_count);
+      totalCountRef.current = result.total_count;
       offsetRef.current = result.memos.length;
     } catch (e) {
       if (!isMounted.current) return;
@@ -139,7 +149,8 @@ export function useMemos(initialParams: ListMemosParams = {}): UseMemosReturn {
   }, []);
 
   const loadMore = useCallback(async () => {
-    if (loadingMore || allMemos.length >= totalCount) return;
+    if (loadingMoreRef.current || offsetRef.current >= totalCountRef.current) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const result = await listMemos({
@@ -150,17 +161,19 @@ export function useMemos(initialParams: ListMemosParams = {}): UseMemosReturn {
       if (!isMounted.current) return;
       setAllMemos((prev) => [...prev, ...result.memos]);
       setTotalCount(result.total_count);
+      totalCountRef.current = result.total_count;
       offsetRef.current += result.memos.length;
     } catch (e) {
       if (!isMounted.current) return;
       setError(e instanceof Error ? e.message : '더 불러오기 중 오류가 발생했습니다');
     } finally {
+      loadingMoreRef.current = false;
       if (isMounted.current) setLoadingMore(false);
     }
-  }, [loadingMore, allMemos.length, totalCount]);
+  }, []);
 
   const calendarSummary = useMemo(() => buildCalendarSummary(allMemos), [allMemos]);
-  const hasMore = allMemos.length < totalCount;
+  const hasMore = offsetRef.current < totalCount;
 
   return {
     allMemos,
