@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 4cb2f12 — 2026-06-08*
+*최종 업데이트: 7b29cbe — 2026-06-09*
 
 ## 공통
 
@@ -1672,3 +1672,4 @@ null  // 삭제 성공 시 데이터 없음
 | [007] 종목 분류 GICS 계층화 (b892f6d) | Sector — 섹터 목록 조회 응답에 `name_en`/`parent_id`/`level` 추가, `level`/`parent_id` 쿼리 파라미터 추가 (GICS 4단계 계층 지원). 섹터 breadcrumb 조회 RPC(`get_sector_breadcrumb`) 신규 추가. Stock — 로컬 종목 검색 및 단건 조회의 sectors join 응답에 `name_en`/`parent_id`/`level` 추가. 종목 조회(단건)에 breadcrumb 안내 주석 추가. 종목 등록+섹터자동추천 RPC(`get_or_recommend_stock_sector`) 변경: `p_naver_industry` 파라미터 제거, `p_yfinance_sector`/`p_yfinance_industry` 파라미터 추가 (kr_sector_map 참조 로직 제거, yfinance 단일 경로), 응답의 `recommended_sector`에 `name_en`/`level` 추가. 종목 섹터 수동 지정/변경에 cascading select 흐름 명세 추가. Memo — 메모 목록 조회(list_memos) 섹터 필터에 계층 탐색 규칙 추가 (L1 지정 시 하위 L2·L3·L4 종목 포함). |
 | [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | Memo — 메모 목록 조회(list_memos) 섹터 필터 계층 탐색 규칙 확장: 기존 "종목 경로"만 언급하던 것에서 "직접 연결 경로(memo_sectors)"까지 포함하는 두 경로 OR 합산으로 명확화. `p_sector_ids` 파라미터 설명 갱신. 메모 생성 RPC(`create_memo_with_links`) `p_sector_ids` 파라미터 설명에 L1~L4 어느 레벨이든 가능 및 cascading select 흐름 명시. 메모 수정 RPC(`update_memo_with_links`) `p_sector_ids` 파라미터 설명 동일하게 갱신. 섹터 연결 추가 단건 API `sector_id` 파라미터 설명에 레벨 제한 없음 및 cascading select 명시. 메모 생성·수정·목록 조회·상세 조회 응답의 `sectors` 배열에 `level` 필드 추가. 메모 상세 조회 REST 호출 구문의 memo_sectors select에 `level` 컬럼 추가. |
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | API 시그니처 변경 없음. Memo — 메모 목록 조회(list_memos) 섹터 필터 계층 탐색 규칙 수정: 직접 연결 경로를 "지정된 섹터 자신 및 하위 레벨"로 명확화 (기존: "하위 레벨만"), L1 자신에 직접 연결된 메모 포함 예시 추가. 핵심 보장 추가: L1 id만 전달해도 RPC 재귀 CTE가 하위 전체를 포함하므로 L2 로딩 여부와 무관하게 동일한 필터 결과 보장. `p_sector_ids` 파라미터 설명에 "자신 및 하위 레벨" 직접 연결 경로 보장 및 L1 id 단독 전달 시 동작 명시. |
+| [008] 섹터 검색 (7b29cbe) | API 시그니처 변경 없음. 섹터 검색은 순수 클라이언트 사이드 기능으로, 기존 섹터 목록 조회(Sector — 섹터 목록 조회)를 파라미터 없이 호출하여 전체 ~273개를 1회 로드한 뒤 클라이언트에서 name/name_en 기준으로 필터링하고 parent_id 체인으로 breadcrumb을 구축한다. 서버 API 추가·변경 없음. |

@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: 4cb2f12 — 2026-06-08*
+*최종 업데이트: 7b29cbe — 2026-06-09*
 
 ## 테이블
 
@@ -430,3 +430,4 @@ memo_sectors }o--|| sectors : "N:1 (sector_id FK, cascade)"
 | [007] 종목 분류 GICS 계층화 (b892f6d) | sectors 테이블 전면 개편: `id` int → serial(시퀀스 시작값 13 이상), `name_en`/`parent_id`/`level`/`created_at` 컬럼 추가, GICS 4단계(L1~L4) 자기참조 계층 구조 도입, 인덱스 `idx_sectors_parent_id`·`idx_sectors_level` 추가. stocks 테이블: `sector_id` 의미 변경(L1 고정 → 가능한 한 L4 Sub-Industry, 매핑 실패 시 최하위 레벨). kr_sector_map 테이블 폐기(DROP). gics_yfinance_map 테이블 신규 추가(yfinance industry 문자열 → GICS L4 sector_id 매핑). ERD 관계 업데이트: kr_sector_map 제거, sectors 자기참조·gics_yfinance_map 추가. |
 | [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | DB 스키마(테이블/컬럼) 변경 없음. memo_sectors 테이블 섹션에 비즈니스 규칙 추가: (1) sector_id가 L1~L4 어느 레벨이든 가리킬 수 있음 명시. (2) 섹터 연결 규칙(cascading select, 중간 단계 확정 가능). (3) 메모 필터 계층 탐색 규칙: 종목 경로(stocks.sector_id 기준 하위 탐색) + 직접 연결 경로(memo_sectors) OR 합산, 재귀 CTE 기반 필터 쿼리 패턴 추가. (4) 필터 UI 선택 상태 규칙(L1 partial/all 상태 표시 기준). |
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | DB 스키마(테이블/컬럼) 변경 없음. stocks 테이블: `name` 컬럼 설명에 메모 리스트형 종목 칩 라벨 표시 규칙(market 무관, 항상 name 표시) 추가. memo_sectors 테이블: 직접 연결 경로 설명을 "자신 및 하위 레벨" 포함으로 명확화(L1 선택 시 L1 자신도 포함), L1/L2 예시 문장 추가, `sectorIds` 동작 상세화(L2 미로딩 시 L1 id만으로 즉시 적용 가능, 이후 L2 보충 추가, L1+L2 id 모두 저장) 반영. |
+| [008] 섹터 검색 (7b29cbe) | DB 스키마(테이블/컬럼/인덱스/RLS) 변경 없음. 섹터 검색은 순수 프론트엔드 기능으로, 기존 sectors 테이블의 name/name_en/parent_id/level 컬럼으로 클라이언트 사이드 breadcrumb 구축 및 필터링을 모두 처리한다. |

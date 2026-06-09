@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 4cb2f12 — 2026-06-08*
+*최종 업데이트: 7b29cbe — 2026-06-09*
 
 ## 엔터티
 
@@ -333,3 +333,4 @@ c ∈ {KRW, USD, ...}.
 | [007] 종목 분류 GICS 계층화 (b892f6d) | Sector 엔터티 전면 개편: `id` int → serial, `name_en`/`parent_id`/`level`/`created_at` 속성 추가. GICS 4단계(L1~L4) 자기참조 계층 구조 도입. KrSectorMap 엔터티 폐기 (kr_sector_map 테이블 DROP). GicsYfinanceMap 엔터티 신규 추가 (yfinance industry → GICS L4 매핑). Stock.sector_id 의미 변경: L1 고정 → 가능한 한 L4(Sub-Industry) 가리킴. 관계 변경: KrSectorMap-Sector 제거, Sector 자기참조 추가, GicsYfinanceMap-Sector 추가. |
 | [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | MemoSector 엔터티 설명 확장: sector_id가 L1~L4 어느 레벨이든 가리킬 수 있음을 명시. 섹터 연결 시 cascading select(L1→L2→L3→L4) UI 및 중간 단계 확정 가능 규칙 추가. 메모 필터 계층 탐색 규칙 추가: 종목 경로(stocks.sector_id 기준 하위 탐색) + 직접 연결 경로(memo_sectors) OR 합산. 필터 UI 선택 상태 규칙 추가: L1 partial/all 상태 표시 기준 명시. |
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | Stock.name 속성 설명 확장: 메모 리스트형 종목 칩 라벨은 market에 관계없이 항상 name(종목명) 표시 규칙 명시. MemoSector 계층 탐색 규칙 명확화: 직접 연결 경로가 "자신 및 하위 레벨" 임을 명시 (L1 선택 시 L1 자신도 포함). 필터 UI sectorIds 동작 상세화: L2 미로딩 시 L1 id만으로 즉시 필터 적용 가능(RPC 재귀 CTE 보장), 이후 L2 로딩 시 보충 추가, sectorIds에 L1+L2 id 모두 저장 명시. |
+| [008] 섹터 검색 (7b29cbe) | 엔터티·속성·관계 변경 없음. 순수 프론트엔드/서비스 레이어 변경: CascadingSectorMultiPicker에 검색 입력 필드 추가, 전체 섹터 클라이언트 캐시 및 클라이언트 사이드 필터링. 기존 Sector 엔터티의 name/name_en/parent_id/level 속성으로 breadcrumb 구축 및 검색을 모두 처리하므로 DB 스키마 변경 불필요. |
