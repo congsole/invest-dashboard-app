@@ -2,7 +2,7 @@
  * MemoEditScreen.tsx — 메모 작성/편집 화면
  *
  * - 본문 입력
- * - 엔티티 연결 선택 (종목/섹터, 복수 선택)
+ * - 엔티티 연결 선택 (종목/섹터/카테고리, 복수 선택)
  * - 종목 선택 시 목표가 입력 필드 노출
  * - 생성 모드: memoId === undefined
  * - 편집 모드: memoId가 전달됨 → 상세 조회 후 초기값 설정
@@ -17,9 +17,14 @@
  * - CascadingSectorMultiPicker 사용
  * - L1~L4 어느 레벨이든 선택 가능
  * - 선택된 섹터는 selectedSectors 배열로 관리
+ *
+ * [025] 카테고리 연결 추가:
+ * - 사용자의 카테고리를 칩으로 나열, 탭하여 선택/해제
+ * - "+ 새 카테고리" 버튼 → 인라인 이름 입력 → 즉시 생성 및 선택
+ * - 메모 생성/수정 시 p_category_ids 전달
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -33,6 +38,7 @@ import {
 } from 'react-native';
 import { useMemoDetail } from '../hooks/useMemoDetail';
 import { useMemoMutation } from '../hooks/useMemoMutation';
+import { useCategories } from '../hooks/useCategories';
 import { Sector } from '../types/sector';
 import { MemoStockInput, ENTITY_COLORS } from '../types/memo';
 import { EntityChip } from '../components/EntityChip';
@@ -58,6 +64,7 @@ interface SelectedStock {
 
 interface MemoEditScreenProps {
   memoId?: string;         // 편집 모드 시 전달
+  userId: string;          // [025] 카테고리 목록 로드용
   onSaved: () => void;
   onDeleted?: () => void;
   onBack: () => void;
@@ -67,15 +74,24 @@ interface MemoEditScreenProps {
 // MemoEditScreen
 // ────────────────────────────────────────────
 
-export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditScreenProps) {
+export function MemoEditScreen({ memoId, userId, onSaved, onDeleted, onBack }: MemoEditScreenProps) {
   const isEdit = memoId !== undefined;
   const { memo: existingMemo, loading: detailLoading, fetch: fetchDetail } = useMemoDetail();
   const { loading: mutLoading, error: mutError, create, update, remove } = useMemoMutation();
+  // [025] 카테고리 목록
+  const { categories, initialLoading: catLoading, addCategory } = useCategories(userId);
 
   const [body, setBody] = useState('');
   const [selectedStocks, setSelectedStocks] = useState<SelectedStock[]>([]);
   // [019] 섹터 연결: sector id 배열 대신 Sector 객체 배열로 관리 (레벨 표시 등 메타 활용)
   const [selectedSectors, setSelectedSectors] = useState<Sector[]>([]);
+  // [025] 카테고리 연결
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  // [025] 인라인 새 카테고리 입력
+  const [newCatInputVisible, setNewCatInputVisible] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatSaving, setNewCatSaving] = useState(false);
+  const newCatInputRef = useRef<TextInput>(null);
   const [stockModalVisible, setStockModalVisible] = useState(false);
 
   // 편집 모드: 기존 데이터 로드
@@ -109,6 +125,10 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
         parent_id: null,
         level: ms.sectors.level,
       })),
+    );
+    // [025] memo_categories → category id 배열로 변환
+    setSelectedCategoryIds(
+      existingMemo.memo_categories.map((mc) => mc.category_id),
     );
   }, [existingMemo]);
 
@@ -155,6 +175,46 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
     [selectedSectors],
   );
 
+  // ── [025] 카테고리 토글 ──
+  const handleCategoryToggle = useCallback((categoryId: string) => {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(categoryId)
+        ? prev.filter((id) => id !== categoryId)
+        : [...prev, categoryId],
+    );
+  }, []);
+
+  // ── [025] 새 카테고리 인라인 저장 ──
+  const handleNewCatSave = useCallback(async () => {
+    const trimmed = newCatName.trim();
+    if (!trimmed) {
+      setNewCatInputVisible(false);
+      setNewCatName('');
+      return;
+    }
+    setNewCatSaving(true);
+    try {
+      const created = await addCategory(trimmed);
+      setSelectedCategoryIds((prev) => [...prev, created.id]);
+      setNewCatName('');
+      setNewCatInputVisible(false);
+    } catch {
+      Alert.alert('오류', '카테고리 생성에 실패했습니다');
+    } finally {
+      setNewCatSaving(false);
+    }
+  }, [newCatName, addCategory]);
+
+  const handleNewCatCancel = useCallback(() => {
+    setNewCatInputVisible(false);
+    setNewCatName('');
+  }, []);
+
+  const handleShowNewCatInput = useCallback(() => {
+    setNewCatInputVisible(true);
+    setTimeout(() => newCatInputRef.current?.focus(), 50);
+  }, []);
+
   // ── 저장 ──
   const handleSave = useCallback(async () => {
     const trimmedBody = body.trim();
@@ -176,6 +236,7 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
         p_sector_ids: selectedSectorIds,
         p_trade_event_ids: null, // 수정 시 매매이벤트 연결은 유지
         p_news_ids: null,
+        p_category_ids: selectedCategoryIds, // [025]
       });
       if (result) onSaved();
     } else {
@@ -183,10 +244,11 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
         p_body: trimmedBody,
         p_stocks: stocksInput,
         p_sector_ids: selectedSectorIds,
+        p_category_ids: selectedCategoryIds, // [025]
       });
       if (result) onSaved();
     }
-  }, [body, selectedStocks, selectedSectorIds, isEdit, memoId, create, update, onSaved]);
+  }, [body, selectedStocks, selectedSectorIds, selectedCategoryIds, isEdit, memoId, create, update, onSaved]);
 
   // ── 삭제 ──
   const handleDelete = useCallback(() => {
@@ -341,6 +403,88 @@ export function MemoEditScreen({ memoId, onSaved, onDeleted, onBack }: MemoEditS
               onToggle={handleSectorToggle}
             />
           </View>
+        </View>
+
+        {/* [025] 카테고리 연결 */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionLabel}>카테고리 연결</Text>
+            {selectedCategoryIds.length > 0 && (
+              <Text style={styles.catHint}>{selectedCategoryIds.length}개 선택됨</Text>
+            )}
+          </View>
+
+          {catLoading ? (
+            <ActivityIndicator size="small" color={ENTITY_COLORS.category} />
+          ) : (
+            <View style={styles.catChipList}>
+              {categories.map((cat) => {
+                const isSelected = selectedCategoryIds.includes(cat.id);
+                return (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[
+                      styles.catChip,
+                      isSelected
+                        ? { backgroundColor: ENTITY_COLORS.category, borderColor: ENTITY_COLORS.category }
+                        : styles.catChipInactive,
+                    ]}
+                    onPress={() => handleCategoryToggle(cat.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.catChipText,
+                        isSelected ? styles.catChipTextActive : styles.catChipTextInactive,
+                      ]}
+                    >
+                      {cat.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+
+              {/* + 새 카테고리 */}
+              {newCatInputVisible ? (
+                <View style={styles.newCatInputRow}>
+                  <TextInput
+                    ref={newCatInputRef}
+                    style={styles.newCatInput}
+                    placeholder="카테고리 이름"
+                    placeholderTextColor="#737688"
+                    value={newCatName}
+                    onChangeText={setNewCatName}
+                    onSubmitEditing={handleNewCatSave}
+                    returnKeyType="done"
+                    maxLength={50}
+                    editable={!newCatSaving}
+                  />
+                  <TouchableOpacity
+                    style={[styles.newCatSaveBtn, newCatSaving && styles.newCatSaveBtnDisabled]}
+                    onPress={handleNewCatSave}
+                    disabled={newCatSaving}
+                  >
+                    {newCatSaving ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.newCatSaveBtnText}>추가</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.newCatCancelBtn} onPress={handleNewCatCancel}>
+                    <Text style={styles.newCatCancelBtnText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.catChipAdd}
+                  onPress={handleShowNewCatInput}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.catChipAddText}>+ 새 카테고리</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
 
         {/* 에러 */}
@@ -528,6 +672,97 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#0b1c30',
+  },
+  // [025] 카테고리 연결 스타일
+  catHint: {
+    fontSize: 12,
+    color: ENTITY_COLORS.category,
+    fontWeight: '600',
+  },
+  catChipList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  catChip: {
+    borderRadius: 9999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+  },
+  catChipInactive: {
+    backgroundColor: '#ffffff',
+    borderColor: '#c3c5d9',
+  },
+  catChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  catChipTextActive: {
+    color: '#ffffff',
+  },
+  catChipTextInactive: {
+    color: '#434656',
+  },
+  catChipAdd: {
+    borderRadius: 9999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: ENTITY_COLORS.category,
+  },
+  catChipAddText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: ENTITY_COLORS.category,
+  },
+  newCatInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 200,
+  },
+  newCatInput: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: '#0b1c30',
+    borderWidth: 1.5,
+    borderColor: ENTITY_COLORS.category,
+  },
+  newCatSaveBtn: {
+    backgroundColor: ENTITY_COLORS.category,
+    borderRadius: 9999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minWidth: 44,
+    alignItems: 'center',
+  },
+  newCatSaveBtnDisabled: {
+    opacity: 0.6,
+  },
+  newCatSaveBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  newCatCancelBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newCatCancelBtnText: {
+    fontSize: 11,
+    color: '#737688',
+    fontWeight: '700',
   },
   // [019] 섹터 연결 — cascading picker 영역
   sectorHint: {

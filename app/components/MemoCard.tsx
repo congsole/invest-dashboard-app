@@ -42,6 +42,10 @@ function buildChips(memo: MemoItem): Array<{ entityType: EntityType; label: stri
     const label = sec.level > 1 ? `L${sec.level} ${sec.name}` : sec.name;
     chips.push({ entityType: 'sector', label, key: `sec-${sec.sector_id}` });
   }
+  // [025] 카테고리 칩 추가
+  for (const cat of memo.categories) {
+    chips.push({ entityType: 'category', label: cat.name, key: `cat-${cat.category_id}` });
+  }
 
   if (chips.length === 0) {
     chips.push({ entityType: 'none', label: '일반', key: 'none' });

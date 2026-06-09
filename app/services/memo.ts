@@ -78,6 +78,7 @@ export async function listMemos(
     p_trade_events_only: params.p_trade_events_only ?? false,
     p_news_only: params.p_news_only ?? false,
     p_sector_ids: params.p_sector_ids ?? null,
+    p_category_ids: params.p_category_ids ?? null,
     p_no_links: params.p_no_links ?? false,
     p_limit: params.p_limit ?? 20,
     p_offset: params.p_offset ?? 0,
@@ -95,7 +96,7 @@ export async function getMemo(memoId: string): Promise<MemoDetail> {
   const { data, error } = await supabase
     .from('memos')
     .select(
-      '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name, level))',
+      '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market, currency, is_active)), memo_trade_events(event_id, account_events(id, event_type, event_date, ticker, name)), memo_news(news_id), memo_sectors(sector_id, sectors(id, code, name, level)), memo_categories(category_id, user_categories(id, name))',
     )
     .eq('id', memoId)
     .single();
@@ -115,6 +116,7 @@ export async function createMemo(input: CreateMemoInput): Promise<MemoItem> {
     p_trade_event_ids: input.p_trade_event_ids ?? [],
     p_news_ids: input.p_news_ids ?? [],
     p_sector_ids: input.p_sector_ids ?? [],
+    p_category_ids: input.p_category_ids ?? null,
   });
 
   if (error) throw error;
@@ -133,6 +135,7 @@ export async function updateMemo(input: UpdateMemoInput): Promise<MemoItem> {
     p_trade_event_ids: input.p_trade_event_ids ?? null,
     p_news_ids: input.p_news_ids ?? null,
     p_sector_ids: input.p_sector_ids ?? null,
+    p_category_ids: input.p_category_ids ?? null,
   });
 
   if (error) throw error;
@@ -300,6 +303,24 @@ export async function unlinkMemoSector(memoId: string, sectorId: number): Promis
     .delete()
     .eq('memo_id', memoId)
     .eq('sector_id', sectorId);
+
+  if (error) throw error;
+}
+
+export async function linkMemoCategory(memoId: string, categoryId: string): Promise<void> {
+  const { error } = await supabase
+    .from('memo_categories')
+    .insert({ memo_id: memoId, category_id: categoryId });
+
+  if (error) throw error;
+}
+
+export async function unlinkMemoCategory(memoId: string, categoryId: string): Promise<void> {
+  const { error } = await supabase
+    .from('memo_categories')
+    .delete()
+    .eq('memo_id', memoId)
+    .eq('category_id', categoryId);
 
   if (error) throw error;
 }

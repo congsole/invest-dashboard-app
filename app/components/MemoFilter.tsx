@@ -2,7 +2,7 @@
  * MemoFilter.tsx — 메모 필터 컴포넌트
  *
  * 필터 결합 규칙 (이슈 015):
- *   - 같은 행 내 복수 선택 → OR (종목, 섹터)
+ *   - 같은 행 내 복수 선택 → OR (종목, 섹터, 카테고리)
  *   - 다른 행/타입 간 → AND
  *   - "연결 없음"(noLinks) 선택 시 다른 필터 자동 해제 (상호 배타적)
  *
@@ -10,6 +10,7 @@
  *   1행 (토글 행): 매매 이벤트 / 뉴스 연관 / 연결 없음 토글
  *   2행 (종목 행): "종목" 헤더 + 가로 스크롤 종목 칩
  *   3행 (섹터 행): "섹터" 헤더 + L1 칩 나열, L1 탭 시 L2 칩 펼침
+ *   4행 (카테고리 행): "카테고리" 헤더 + 칩 복수 선택 + 편집 아이콘 [025]
  *
  * 섹터 필터 동작 (이슈 022):
  *   - L1 선택 → L1 id를 sectorIds에 즉시 추가 (L2 미로딩 상태도 가능)
@@ -26,6 +27,11 @@
  *     1) 해당 L2 하위 종목에 연결된 메모 (종목 경로)
  *     2) memo_sectors에 직접 L2/L3/L4로 연결된 메모 (직접 연결 경로)
  *   - 프론트에서 별도 변경 없이 L3/L4로 직접 연결된 메모도 필터 결과에 포함됨
+ *
+ * [025] 카테고리 행 추가:
+ *   - categories prop으로 카테고리 목록 수신
+ *   - 칩 탭으로 복수 선택 (같은 행 OR)
+ *   - 행 우측 편집 아이콘 탭 → onCategoryManagePress 콜백
  */
 
 import React, { useCallback, useMemo } from 'react';
@@ -39,6 +45,7 @@ import {
 } from 'react-native';
 import { MemoFilterState, ENTITY_COLORS } from '../types/memo';
 import { Sector } from '../types/sector';
+import { UserCategoryWithCount } from '../types/category';
 
 interface MemoFilterProps {
   filter: MemoFilterState;
@@ -46,10 +53,14 @@ interface MemoFilterProps {
   l1Sectors: Sector[];
   /** L1별 L2 목록 맵 (key: L1 sector id, value: L2 sectors) */
   l2SectorMap: Map<number, Sector[]>;
+  /** [025] 사용자 카테고리 목록 */
+  categories: UserCategoryWithCount[];
   onFilterChange: (updated: Partial<MemoFilterState>) => void;
   onStockPickerOpen: () => void;
   /** L1 칩 펼침 시 호출 — 부모가 L2 목록을 지연 로딩함 */
   onExpandL1?: (l1SectorId: number | null) => void;
+  /** [025] 카테고리 편집 아이콘 탭 시 호출 */
+  onCategoryManagePress?: () => void;
 }
 
 interface FilterChipProps {
@@ -236,6 +247,35 @@ const SelectedStockChip = React.memo(function SelectedStockChip({
   );
 });
 
+// ── [025] 카테고리 칩 (categoryId 캡처, onToggle 안정화) ──
+
+interface CategoryFilterChipProps {
+  categoryId: string;
+  categoryName: string;
+  active: boolean;
+  onToggle: (categoryId: string, categoryName: string) => void;
+}
+
+const CategoryFilterChip = React.memo(function CategoryFilterChip({
+  categoryId,
+  categoryName,
+  active,
+  onToggle,
+}: CategoryFilterChipProps) {
+  const handlePress = useCallback(
+    () => onToggle(categoryId, categoryName),
+    [categoryId, categoryName, onToggle],
+  );
+  return (
+    <FilterChip
+      label={categoryName}
+      active={active}
+      color={ENTITY_COLORS.category}
+      onPress={handlePress}
+    />
+  );
+});
+
 // ── L2 칩 행 (펼쳐진 L1 하위) ──
 
 interface L2RowProps {
@@ -279,9 +319,11 @@ export const MemoFilter = React.memo(function MemoFilter({
   filter,
   l1Sectors,
   l2SectorMap,
+  categories,
   onFilterChange,
   onStockPickerOpen,
   onExpandL1,
+  onCategoryManagePress,
 }: MemoFilterProps) {
   // 현재 expanded된 L1 sector id (하나만 펼침)
   const [expandedL1Id, setExpandedL1Id] = React.useState<number | null>(null);
@@ -331,6 +373,8 @@ export const MemoFilter = React.memo(function MemoFilter({
         newsOnly: false,
         sectorIds: [],
         sectorNames: [],
+        categoryIds: [],
+        categoryNames: [],
       });
     } else {
       onFilterChange({ noLinks: false });
@@ -430,12 +474,32 @@ export const MemoFilter = React.memo(function MemoFilter({
     [filter.stockIds, filter.stockNames, onFilterChange],
   );
 
+  // [025] 카테고리 칩 토글
+  const handleToggleCategory = useCallback(
+    (categoryId: string, categoryName: string) => {
+      const idx = filter.categoryIds.indexOf(categoryId);
+      if (idx >= 0) {
+        const newIds = filter.categoryIds.filter((id) => id !== categoryId);
+        const newNames = filter.categoryNames.filter((_, i) => i !== idx);
+        onFilterChange({ categoryIds: newIds, categoryNames: newNames });
+      } else {
+        onFilterChange({
+          categoryIds: [...filter.categoryIds, categoryId],
+          categoryNames: [...filter.categoryNames, categoryName],
+          noLinks: false,
+        });
+      }
+    },
+    [filter.categoryIds, filter.categoryNames, onFilterChange],
+  );
+
   const hasAnyFilter = useMemo(
     () =>
       filter.stockIds.length > 0 ||
       filter.tradeEventsOnly ||
       filter.newsOnly ||
       filter.sectorIds.length > 0 ||
+      filter.categoryIds.length > 0 ||
       filter.noLinks,
     [filter],
   );
@@ -448,6 +512,8 @@ export const MemoFilter = React.memo(function MemoFilter({
       newsOnly: false,
       sectorIds: [],
       sectorNames: [],
+      categoryIds: [],
+      categoryNames: [],
       noLinks: false,
     });
     setExpandedL1Id(null);
@@ -551,6 +617,38 @@ export const MemoFilter = React.memo(function MemoFilter({
           onToggle={handleToggleL2Sector}
         />
       )}
+
+      {/* [025] 5행: 카테고리 행 — 헤더 + 칩 + 편집 아이콘 */}
+      <View style={styles.filterRow}>
+        <Text style={styles.rowLabelWide}>카테고리</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {categories.map((cat) => (
+            <CategoryFilterChip
+              key={cat.id}
+              categoryId={cat.id}
+              categoryName={cat.name}
+              active={filter.categoryIds.includes(cat.id)}
+              onToggle={handleToggleCategory}
+            />
+          ))}
+          {categories.length === 0 && (
+            <Text style={styles.emptyRowText}>카테고리 없음</Text>
+          )}
+        </ScrollView>
+        {onCategoryManagePress && (
+          <TouchableOpacity
+            style={styles.categoryEditBtn}
+            onPress={onCategoryManagePress}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.categoryEditIcon}>⚙</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 });
@@ -651,6 +749,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9ca3af',
     paddingVertical: 8,
+  },
+  // [025] 카테고리 편집 버튼
+  categoryEditBtn: {
+    paddingRight: 12,
+    paddingLeft: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  categoryEditIcon: {
+    fontSize: 16,
+    color: '#737688',
+  },
+  // rowLabel 너비를 카테고리 텍스트에 맞게 확장
+  rowLabelWide: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#737688',
+    width: 44,
+    flexShrink: 0,
+    letterSpacing: 0.3,
   },
 });
 

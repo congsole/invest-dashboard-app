@@ -7,15 +7,9 @@
  * - 달력형/리스트형 모두 동일 데이터 소스 사용
  */
 
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
-import { listMemos } from '../services/memo';
-import {
-  MemoItem,
-  ListMemosParams,
-  MemoFilterState,
-  DayMemoSummary,
-  EntityType,
-} from '../types/memo';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {listMemos} from '../services/memo';
+import {DayMemoSummary, EntityType, ListMemosParams, MemoItem,} from '../types/memo';
 
 interface UseMemosReturn {
   allMemos: MemoItem[];
@@ -40,6 +34,8 @@ function extractEntityTypes(memo: MemoItem): EntityType[] {
   if (memo.trade_events.length > 0) types.push('trade_event');
   if (memo.news.length > 0) types.push('news');
   if (memo.sectors.length > 0) types.push('sector');
+  // [025] 카테고리 타입 추가
+  if (memo.categories.length > 0) types.push('category');
   if (types.length === 0) types.push('none');
   return types.slice(0, 4);
 }
@@ -60,8 +56,7 @@ function buildCalendarSummary(memos: MemoItem[]): Map<string, DayMemoSummary> {
     if (existing) {
       // 타입 중복 제거 유지
       const mergedSet = new Set([...existing.entityTypes, ...entityTypes]);
-      const merged = Array.from(mergedSet).slice(0, 4) as EntityType[];
-      existing.entityTypes = merged;
+      existing.entityTypes = Array.from(mergedSet).slice(0, 4) as EntityType[];
       existing.memoIds.push(memo.id);
     } else {
       map.set(date, {

@@ -8,8 +8,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { signOut } from '../services/auth';
+import { AuthUser } from '../types/auth';
 
-export function SettingsScreen() {
+interface SettingsScreenProps {
+  user: AuthUser;
+  onCategoryManage: () => void;
+}
+
+export function SettingsScreen({ user: _user, onCategoryManage }: SettingsScreenProps) {
   const [loading, setLoading] = useState(false);
 
   const handleLogout = () => {
@@ -46,6 +52,13 @@ export function SettingsScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>설정</Text>
       <View style={styles.section}>
+        {/* 카테고리 관리 */}
+        <TouchableOpacity style={styles.menuItem} onPress={onCategoryManage}>
+          <Text style={styles.menuItemText}>카테고리 관리</Text>
+          <Text style={styles.menuItemChevron}>›</Text>
+        </TouchableOpacity>
+
+        {/* 로그아웃 */}
         <TouchableOpacity
           style={[styles.logoutButton, loading && styles.logoutButtonDisabled]}
           onPress={handleLogout}
@@ -78,6 +91,23 @@ const styles = StyleSheet.create({
   section: {
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  menuItemText: {
+    fontSize: 16,
+    color: '#0b1c30',
+    fontWeight: '500',
+  },
+  menuItemChevron: {
+    fontSize: 20,
+    color: '#b0b3c6',
   },
   logoutButton: {
     paddingVertical: 16,

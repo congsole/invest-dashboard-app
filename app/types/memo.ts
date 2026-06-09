@@ -52,6 +52,11 @@ export interface MemoSector {
   level: 1 | 2 | 3 | 4;
 }
 
+export interface MemoCategory {
+  category_id: string;
+  name: string;
+}
+
 // ── 메모 목록 아이템 ──
 
 export interface MemoItem {
@@ -63,6 +68,7 @@ export interface MemoItem {
   trade_events: MemoTradeEvent[];
   news: MemoNews[];
   sectors: MemoSector[];
+  categories: MemoCategory[];
 }
 
 // ── 메모 상세 (REST 조회) ──
@@ -105,6 +111,13 @@ export interface MemoDetail {
       level: 1 | 2 | 3 | 4;
     };
   }>;
+  memo_categories: Array<{
+    category_id: string;
+    user_categories: {
+      id: string;
+      name: string;
+    };
+  }>;
 }
 
 // ── list_memos 응답 ──
@@ -127,6 +140,7 @@ export interface CreateMemoInput {
   p_trade_event_ids?: string[];
   p_news_ids?: string[];
   p_sector_ids?: number[];
+  p_category_ids?: string[] | null;
 }
 
 export interface UpdateMemoInput {
@@ -136,6 +150,8 @@ export interface UpdateMemoInput {
   p_trade_event_ids?: string[] | null;
   p_news_ids?: string[] | null;
   p_sector_ids?: number[] | null;
+  /** null=변경없음, 빈배열=전체해제 */
+  p_category_ids?: string[] | null;
 }
 
 // ── list_memos 파라미터 ──
@@ -147,6 +163,8 @@ export interface ListMemosParams {
   p_trade_events_only?: boolean;
   p_news_only?: boolean;
   p_sector_ids?: number[] | null;
+  /** 카테고리 필터. 종목 경로 + 직접 연결 경로 OR 합산. 다른 필터와 AND 결합. */
+  p_category_ids?: string[] | null;
   p_no_links?: boolean;
   p_limit?: number;
   p_offset?: number;
@@ -154,7 +172,7 @@ export interface ListMemosParams {
 
 // ── 달력형 뷰에서 날짜별 엔티티 타입 점 표시 ──
 
-export type EntityType = 'stock' | 'trade_event' | 'news' | 'sector' | 'none';
+export type EntityType = 'stock' | 'trade_event' | 'news' | 'sector' | 'category' | 'none';
 
 export interface DayMemoSummary {
   date: string; // YYYY-MM-DD
@@ -167,6 +185,8 @@ export interface DayMemoSummary {
 // stockNames: stockIds에 대응하는 표시용 이름 배열
 // sectorIds: 복수 선택 가능 (OR 필터)
 // sectorNames: sectorIds에 대응하는 표시용 이름 배열
+// categoryIds: 복수 선택 가능 (OR 필터, 종목 경로 + 직접 연결 경로 합산)
+// categoryNames: categoryIds에 대응하는 표시용 이름 배열
 // noLinks: true 시 다른 엔티티 필터 무시 (상호 배타적)
 
 export interface MemoFilterState {
@@ -176,6 +196,8 @@ export interface MemoFilterState {
   newsOnly: boolean;
   sectorIds: number[];
   sectorNames: string[];
+  categoryIds: string[];
+  categoryNames: string[];
   noLinks: boolean;
 }
 
@@ -186,6 +208,8 @@ export const DEFAULT_FILTER_STATE: MemoFilterState = {
   newsOnly: false,
   sectorIds: [],
   sectorNames: [],
+  categoryIds: [],
+  categoryNames: [],
   noLinks: false,
 };
 
@@ -196,5 +220,6 @@ export const ENTITY_COLORS: Record<EntityType, string> = {
   trade_event: '#22C55E',
   news: '#8B5CF6',
   sector: '#14B8A6',
+  category: '#F59E0B',
   none: '#9CA3AF',
 };

@@ -24,6 +24,7 @@ import {
   View,
 } from 'react-native';
 import {useMemos} from '../hooks/useMemos';
+import {useCategories} from '../hooks/useCategories';
 import {CalendarView} from '../components/CalendarView';
 import {MemoCard} from '../components/MemoCard';
 import {MemoFilter} from '../components/MemoFilter';
@@ -57,6 +58,8 @@ function filterToParams(filter: MemoFilterState): ListMemosParams {
     p_trade_events_only: filter.tradeEventsOnly,
     p_news_only: filter.newsOnly,
     p_sector_ids: filter.sectorIds.length > 0 ? filter.sectorIds : null,
+    // [025] 카테고리 필터 추가
+    p_category_ids: filter.categoryIds.length > 0 ? filter.categoryIds : null,
     p_no_links: filter.noLinks,
   };
 }
@@ -68,6 +71,10 @@ function filterToParams(filter: MemoFilterState): ListMemosParams {
 interface MemoListScreenProps {
   onMemoPress: (memoId: string) => void;
   onAddMemo: () => void;
+  /** [025] 카테고리 목록 로드용 userId */
+  userId: string;
+  /** [025] 카테고리 관리 화면으로 이동 */
+  onCategoryManagePress?: () => void;
 }
 
 // ────────────────────────────────────────────
@@ -211,6 +218,9 @@ interface MemoFilterSectionProps {
   viewModeRef: React.MutableRefObject<ViewMode>;
   calYearRef: React.MutableRefObject<number>;
   calMonthRef: React.MutableRefObject<number>;
+  /** [025] */
+  userId: string;
+  onCategoryManagePress?: () => void;
 }
 
 const MemoFilterSection = React.memo(function MemoFilterSection({
@@ -219,12 +229,16 @@ const MemoFilterSection = React.memo(function MemoFilterSection({
   viewModeRef,
   calYearRef,
   calMonthRef,
+  userId,
+  onCategoryManagePress,
 }: MemoFilterSectionProps) {
   const [filter, setFilter] = useState<MemoFilterState>(DEFAULT_FILTER_STATE);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [l2SectorMap, setL2SectorMap] = useState<Map<number, Sector[]>>(new Map());
   const [stockPickerVisible, setStockPickerVisible] = useState(false);
   const loadedL1IdsRef = useRef<Set<number>>(new Set());
+  // [025] 카테고리 목록
+  const { categories } = useCategories(userId);
 
   // filterRef 동기화 — 부모(MemoListScreen)가 현재 필터를 읽을 수 있도록
   useEffect(() => {
@@ -317,9 +331,11 @@ const MemoFilterSection = React.memo(function MemoFilterSection({
         filter={filter}
         l1Sectors={sectors}
         l2SectorMap={l2SectorMap}
+        categories={categories}
         onFilterChange={handleFilterChange}
         onStockPickerOpen={handleStockPickerOpen}
         onExpandL1={handleExpandL1}
+        onCategoryManagePress={onCategoryManagePress}
       />
       <StockPickerModal
         visible={stockPickerVisible}
@@ -336,7 +352,7 @@ const MemoFilterSection = React.memo(function MemoFilterSection({
 
 const MemoListSeparator = () => <View style={styles.separator} />;
 
-export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) {
+export function MemoListScreen({ onMemoPress, onAddMemo, userId, onCategoryManagePress }: MemoListScreenProps) {
   const today = new Date();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [calYear, setCalYear] = useState(today.getFullYear());
@@ -473,6 +489,8 @@ export function MemoListScreen({ onMemoPress, onAddMemo }: MemoListScreenProps) 
         viewModeRef={viewModeRef}
         calYearRef={calYearRef}
         calMonthRef={calMonthRef}
+        userId={userId}
+        onCategoryManagePress={onCategoryManagePress}
       />
 
       {/* 에러 배너 */}

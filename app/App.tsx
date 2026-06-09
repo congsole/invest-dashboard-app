@@ -63,11 +63,11 @@ export default function App() {
     );
   }
 
-  // 인증된 사용자 → 메인 화면 (대시보드 + 투자 일지 탭)
+  // 인증된 사용자 → 메인 화면 (대시보드 + 투자 일지 + 설정 탭)
   if (user) {
     return (
       <>
-        <MainScreen />
+        <MainScreen user={user} />
         <StatusBar style="auto" />
       </>
     );

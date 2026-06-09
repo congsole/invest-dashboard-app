@@ -49,7 +49,9 @@
       "Bash(kill 22856)",
       "Bash(eas --version)",
       "Bash(npx eas:*)",
-      "Bash(cat app/supabase/migrations/*sector*)"
+      "Bash(cat app/supabase/migrations/*sector*)",
+      "Read(//Users/imsi/.config/supabase/**)",
+      "Read(//Users/imsi/.supabase/**)"
     ]
   }
 }

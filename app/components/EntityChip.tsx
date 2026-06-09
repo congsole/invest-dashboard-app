@@ -23,6 +23,7 @@ const ENTITY_LABELS: Record<EntityType, string> = {
   trade_event: '매매',
   news: '뉴스',
   sector: '섹터',
+  category: '카테고리',
   none: '일반',
 };
 
