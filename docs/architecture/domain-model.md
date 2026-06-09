@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 7b29cbe — 2026-06-09*
+*최종 업데이트: 5872267 — 2026-06-09*
 
 ## 엔터티
 
@@ -231,6 +231,41 @@ yfinance `industry` 문자열 → GICS Sub-Industry(L4) code 매핑 테이블. y
 | memo_id | uuid | 메모 ID | PK (복합), FK → memos(id) on delete cascade |
 | sector_id | int | 섹터 ID (L1~L4 어느 레벨이든 가능) | PK (복합), FK → sectors(id) on delete cascade |
 
+### UserCategory
+사용자가 직접 정의한 카테고리 마스터. 플랫(flat) 구조로 계층 없음. 사용자별로 동일 이름 카테고리를 중복 등록할 수 없다. 카테고리 삭제 시 `memo_categories`, `user_category_stocks`는 cascade 삭제되며 메모 본체는 유지된다. DB 테이블명: `user_categories`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| id | uuid | 기본 키 | PK, not null |
+| user_id | uuid | 사용자 ID | FK → auth.users(id), not null |
+| name | text | 카테고리 이름 | not null |
+| created_at | timestamptz | 생성 시각 | not null |
+| updated_at | timestamptz | 수정 시각 | not null |
+
+> `(user_id, name)` unique 제약.
+
+### UserCategoryStock
+카테고리-종목 N:M 매핑 junction 테이블. 카테고리에 종목을 할당하여 종목 경로 필터링에 활용한다. DB 테이블명: `user_category_stocks`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| category_id | uuid | 카테고리 ID | PK (복합), FK → user_categories(id) on delete cascade |
+| stock_id | uuid | 종목 ID | PK (복합), FK → stocks(id) on delete cascade |
+
+### MemoCategory
+메모-카테고리 N:M 연결 junction 테이블. 메모에 카테고리를 직접 연결한다. 카테고리 필터링 시 종목 경로(user_category_stocks 경유 memo_stocks)와 직접 연결 경로(memo_categories)를 OR 합산하여 결과를 반환한다. 이 패턴은 섹터 필터(MemoSector)와 동일하다. DB 테이블명: `memo_categories`.
+
+#### 카테고리 필터 경로
+1. **종목 경로**: 해당 카테고리에 속한 종목(`user_category_stocks`)과 연결된 메모(`memo_stocks` 경유).
+2. **직접 연결 경로**: `memo_categories`로 해당 카테고리에 직접 연결된 메모.
+
+> 카테고리만 연결된 메모는 "연결 없음" 필터 대상에 해당하지 않는다.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| memo_id | uuid | 메모 ID | PK (복합), FK → memos(id) on delete cascade |
+| category_id | uuid | 카테고리 ID | PK (복합), FK → user_categories(id) on delete cascade |
+
 ## 관계
 
 | 관계 | 설명 |
@@ -249,6 +284,9 @@ yfinance `industry` 문자열 → GICS Sub-Industry(L4) code 매핑 테이블. y
 | Memo N:M AccountEvent | 한 메모는 여러 매매이벤트에 연결될 수 있다 (MemoTradeEvent junction, buy/sell만). |
 | Memo N:M News | 한 메모는 여러 뉴스에 연결될 수 있다 (MemoNews junction). |
 | Memo N:M Sector | 한 메모는 여러 섹터에 연결될 수 있다 (MemoSector junction). |
+| User 1:N UserCategory | 한 사용자는 여러 카테고리를 가질 수 있다. 카테고리 이름은 사용자 내 unique. |
+| UserCategory N:M Stock | 한 카테고리는 여러 종목을 포함할 수 있고, 하나의 종목은 여러 카테고리에 속할 수 있다 (UserCategoryStock junction). |
+| Memo N:M UserCategory | 한 메모는 여러 카테고리에 연결될 수 있고, 하나의 카테고리는 여러 메모에 연결될 수 있다 (MemoCategory junction). |
 
 ## 계산 규칙
 
@@ -334,3 +372,4 @@ c ∈ {KRW, USD, ...}.
 | [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | MemoSector 엔터티 설명 확장: sector_id가 L1~L4 어느 레벨이든 가리킬 수 있음을 명시. 섹터 연결 시 cascading select(L1→L2→L3→L4) UI 및 중간 단계 확정 가능 규칙 추가. 메모 필터 계층 탐색 규칙 추가: 종목 경로(stocks.sector_id 기준 하위 탐색) + 직접 연결 경로(memo_sectors) OR 합산. 필터 UI 선택 상태 규칙 추가: L1 partial/all 상태 표시 기준 명시. |
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | Stock.name 속성 설명 확장: 메모 리스트형 종목 칩 라벨은 market에 관계없이 항상 name(종목명) 표시 규칙 명시. MemoSector 계층 탐색 규칙 명확화: 직접 연결 경로가 "자신 및 하위 레벨" 임을 명시 (L1 선택 시 L1 자신도 포함). 필터 UI sectorIds 동작 상세화: L2 미로딩 시 L1 id만으로 즉시 필터 적용 가능(RPC 재귀 CTE 보장), 이후 L2 로딩 시 보충 추가, sectorIds에 L1+L2 id 모두 저장 명시. |
 | [008] 섹터 검색 (7b29cbe) | 엔터티·속성·관계 변경 없음. 순수 프론트엔드/서비스 레이어 변경: CascadingSectorMultiPicker에 검색 입력 필드 추가, 전체 섹터 클라이언트 캐시 및 클라이언트 사이드 필터링. 기존 Sector 엔터티의 name/name_en/parent_id/level 속성으로 breadcrumb 구축 및 검색을 모두 처리하므로 DB 스키마 변경 불필요. |
+| [009] 사용자 카테고리 (5872267) | UserCategory 엔터티 신규 추가 (user_id, name, unique(user_id, name)). UserCategoryStock junction 엔터티 신규 추가 (category_id PK+FK, stock_id PK+FK). MemoCategory junction 엔터티 신규 추가 (memo_id PK+FK, category_id PK+FK). 관계 3건 추가: User 1:N UserCategory, UserCategory N:M Stock, Memo N:M UserCategory. 카테고리 필터링 규칙 추가: 종목 경로 + 직접 연결 경로 OR 합산 (섹터 필터와 동일 패턴). |

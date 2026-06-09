@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: 7b29cbe — 2026-06-09*
+*최종 업데이트: 5872267 — 2026-06-09*
 
 ## 테이블
 
@@ -375,6 +375,77 @@ WHERE sector_id IN (SELECT id FROM descendants);
 
 ---
 
+### user_categories
+사용자가 직접 정의한 카테고리 마스터. 플랫(flat) 구조로 계층 없음. 사용자별로 동일 이름 카테고리 중복 등록 불가. 카테고리 삭제 시 `memo_categories`, `user_category_stocks`는 cascade 삭제되며 메모 본체는 유지된다.
+
+| 컬럼 | 타입 | 기본값 | 제약 | 설명 |
+|------|------|--------|------|------|
+| id | uuid | gen_random_uuid() | PK | 기본 키 |
+| user_id | uuid | — | FK → auth.users(id) ON DELETE CASCADE, not null | 사용자 ID |
+| name | text | — | not null | 카테고리 이름 (예: '2차전지', 'AI반도체') |
+| created_at | timestamptz | now() | not null | 생성 시각 |
+| updated_at | timestamptz | now() | not null | 수정 시각 |
+
+**UNIQUE 제약**
+- `uq_user_categories_user_id_name` ON (user_id, name) — 같은 사용자 내 카테고리명 중복 불가
+
+**인덱스**
+- `idx_user_categories_user_id` ON (user_id) — 사용자별 카테고리 목록 조회
+
+**RLS 방향**
+- SELECT / INSERT / UPDATE / DELETE: 본인(`auth.uid() = user_id`)만 허용 (구현은 supabase-impl-agent)
+
+---
+
+### user_category_stocks
+카테고리-종목 N:M 매핑 junction 테이블. 한 종목이 여러 카테고리에 속할 수 있고, 한 카테고리에 여러 종목이 포함될 수 있다. 카테고리 삭제 시 cascade 삭제. 종목 삭제 시 cascade 삭제(카테고리 자체는 유지).
+
+| 컬럼 | 타입 | 기본값 | 제약 | 설명 |
+|------|------|--------|------|------|
+| category_id | uuid | — | PK (복합), FK → user_categories(id) ON DELETE CASCADE, not null | 카테고리 ID |
+| stock_id | uuid | — | PK (복합), FK → stocks(id) ON DELETE CASCADE, not null | 종목 ID |
+| created_at | timestamptz | now() | not null | 생성 시각 |
+
+**인덱스**
+- `idx_user_category_stocks_stock_id` ON (stock_id) — 종목별 소속 카테고리 역방향 조회
+
+**RLS 방향**
+- SELECT / INSERT / DELETE: category_id를 통해 user_categories.user_id = auth.uid() 검증 (구현은 supabase-impl-agent)
+
+---
+
+### memo_categories
+메모-카테고리 N:M 연결 junction 테이블. 메모에 카테고리를 직접 연결한다. 메모 삭제 시 cascade 삭제. 카테고리 삭제 시 cascade 삭제(메모 본체는 유지).
+
+카테고리 필터링 시 종목 경로(`user_category_stocks` 경유 `memo_stocks`)와 직접 연결 경로(`memo_categories`)를 OR 합산하여 결과를 반환한다. 이 패턴은 섹터 필터(`memo_sectors`)와 동일하나, 카테고리는 플랫 구조이므로 재귀 CTE 불필요.
+
+| 컬럼 | 타입 | 기본값 | 제약 | 설명 |
+|------|------|--------|------|------|
+| memo_id | uuid | — | PK (복합), FK → memos(id) ON DELETE CASCADE, not null | 메모 ID |
+| category_id | uuid | — | PK (복합), FK → user_categories(id) ON DELETE CASCADE, not null | 카테고리 ID |
+
+**카테고리 필터 쿼리 패턴**
+
+```sql
+-- 카테고리 필터: target_category_ids = 선택된 카테고리 ID 집합
+-- 1. 종목 경로: 카테고리에 속한 종목과 연결된 메모
+SELECT DISTINCT ms.memo_id FROM memo_stocks ms
+JOIN user_category_stocks ucs ON ucs.stock_id = ms.stock_id
+WHERE ucs.category_id = ANY(:target_category_ids)
+UNION
+-- 2. 직접 연결 경로
+SELECT DISTINCT memo_id FROM memo_categories
+WHERE category_id = ANY(:target_category_ids);
+```
+
+**인덱스**
+- `idx_memo_categories_category_id` ON (category_id) — 카테고리별 연결 메모 역방향 조회
+
+**RLS 방향**
+- SELECT / INSERT / DELETE: memo_id를 통해 memos.user_id = auth.uid() 검증 (구현은 supabase-impl-agent)
+
+---
+
 ### auth.identities (참조 전용 — Supabase 자동 관리)
 Supabase Auth가 자동 관리하는 인증 제공자 연동 정보. 앱에서 직접 DDL을 작성하거나 수정하지 않는다. 동일 User에 email / google / apple 등 여러 provider가 연결될 수 있으며, 동일 이메일이면 Supabase 자동 링킹으로 하나의 `auth.users` 레코드에 병합된다.
 
@@ -409,9 +480,14 @@ memos ||--o{ memo_stocks : "1:N (memo_id FK, cascade)"
 memos ||--o{ memo_trade_events : "1:N (memo_id FK, cascade)"
 memos ||--o{ memo_news : "1:N (memo_id FK, cascade)"
 memos ||--o{ memo_sectors : "1:N (memo_id FK, cascade)"
+memos ||--o{ memo_categories : "1:N (memo_id FK, cascade)"
 memo_stocks }o--|| stocks : "N:1 (stock_id FK, cascade)"
 memo_trade_events }o--|| account_events : "N:1 (event_id FK, cascade)"
 memo_sectors }o--|| sectors : "N:1 (sector_id FK, cascade)"
+memo_categories }o--|| user_categories : "N:1 (category_id FK, cascade)"
+auth.users ||--o{ user_categories : "1:N (user_id FK)"
+user_categories ||--o{ user_category_stocks : "1:N (category_id FK, cascade)"
+user_category_stocks }o--|| stocks : "N:1 (stock_id FK, cascade)"
 ```
 
 ## 변경 이력
@@ -431,3 +507,4 @@ memo_sectors }o--|| sectors : "N:1 (sector_id FK, cascade)"
 | [007] GICS 메모-섹터 연결 규칙 명확화 (4edb385) | DB 스키마(테이블/컬럼) 변경 없음. memo_sectors 테이블 섹션에 비즈니스 규칙 추가: (1) sector_id가 L1~L4 어느 레벨이든 가리킬 수 있음 명시. (2) 섹터 연결 규칙(cascading select, 중간 단계 확정 가능). (3) 메모 필터 계층 탐색 규칙: 종목 경로(stocks.sector_id 기준 하위 탐색) + 직접 연결 경로(memo_sectors) OR 합산, 재귀 CTE 기반 필터 쿼리 패턴 추가. (4) 필터 UI 선택 상태 규칙(L1 partial/all 상태 표시 기준). |
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | DB 스키마(테이블/컬럼) 변경 없음. stocks 테이블: `name` 컬럼 설명에 메모 리스트형 종목 칩 라벨 표시 규칙(market 무관, 항상 name 표시) 추가. memo_sectors 테이블: 직접 연결 경로 설명을 "자신 및 하위 레벨" 포함으로 명확화(L1 선택 시 L1 자신도 포함), L1/L2 예시 문장 추가, `sectorIds` 동작 상세화(L2 미로딩 시 L1 id만으로 즉시 적용 가능, 이후 L2 보충 추가, L1+L2 id 모두 저장) 반영. |
 | [008] 섹터 검색 (7b29cbe) | DB 스키마(테이블/컬럼/인덱스/RLS) 변경 없음. 섹터 검색은 순수 프론트엔드 기능으로, 기존 sectors 테이블의 name/name_en/parent_id/level 컬럼으로 클라이언트 사이드 breadcrumb 구축 및 필터링을 모두 처리한다. |
+| [009] 사용자 카테고리 (5872267) | user_categories 테이블 신규 추가 (user_id FK, name, unique(user_id, name), 인덱스 idx_user_categories_user_id). user_category_stocks junction 테이블 신규 추가 (category_id+stock_id 복합 PK, 각각 cascade FK, created_at, 인덱스 idx_user_category_stocks_stock_id). memo_categories junction 테이블 신규 추가 (memo_id+category_id 복합 PK, 각각 cascade FK, 인덱스 idx_memo_categories_category_id, 카테고리 필터 쿼리 패턴 기록). ERD 관계 5건 추가: auth.users→user_categories, user_categories→user_category_stocks, user_category_stocks→stocks, memos→memo_categories, memo_categories→user_categories. |
