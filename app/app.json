@@ -28,10 +28,22 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "updates": {
+      "url": "https://u.expo.dev/UPDATE_AFTER_EAS_INIT"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "plugins": [
       "expo-secure-store",
       "expo-web-browser",
       "expo-apple-authentication"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "85d28886-70f1-485a-b162-53db4f8c1c86"
+      }
+    },
+    "owner": "solhe"
   }
 }

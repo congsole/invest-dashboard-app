@@ -46,7 +46,9 @@
       "Bash(kill 21397)",
       "Bash(kill 22186)",
       "Bash(kill 22313)",
-      "Bash(kill 22856)"
+      "Bash(kill 22856)",
+      "Bash(eas --version)",
+      "Bash(npx eas:*)"
     ]
   }
 }
