@@ -32,6 +32,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useStockSearch } from '../hooks/useStockSearch';
+import { useSectorSearch } from '../hooks/useSectorSearch';
 import { StockSearchResult, ExternalStockSearchResult, StockMarket, Sector } from '../types/sector';
 import { getSectors } from '../services/sectors';
 import {
@@ -75,6 +76,7 @@ interface StockSearchModalProps {
 // ────────────────────────────────────────────
 // Cascading 섹터 선택 패널 (L1 → L2 → L3 → L4)
 // sector_id가 null일 때 노출
+// [023] 상단 검색 필드 추가
 // ────────────────────────────────────────────
 
 interface CascadingSectorPickerProps {
@@ -102,6 +104,10 @@ const CascadingSectorPicker = React.memo(function CascadingSectorPicker({
   const [l2Loading, setL2Loading] = useState(false);
   const [l3Loading, setL3Loading] = useState(false);
   const [l4Loading, setL4Loading] = useState(false);
+
+  // [023] 검색 훅
+  const { query, setQuery, clearQuery, results: searchResults, loading: searchLoading, error: searchError, isSearchMode } =
+    useSectorSearch();
 
   // L1 목록 초기 로드
   React.useEffect(() => {
@@ -156,6 +162,11 @@ const CascadingSectorPicker = React.memo(function CascadingSectorPicker({
     onPick({ id: sector.id, code: sector.code, name: sector.name });
   }, [onPick]);
 
+  // [023] 검색 결과에서 탭 → 즉시 확정
+  const handleSearchSelect = useCallback((sector: Sector) => {
+    onPick({ id: sector.id, code: sector.code, name: sector.name });
+  }, [onPick]);
+
   // 현재 단계 선택 완료 버튼 (L1 선택 후 L2 없이 바로 확정 가능)
   const canConfirmAtL1 = selectedL1 !== null && l2List.length === 0 && !l2Loading;
   const canConfirmAtL2 = selectedL2 !== null && l3List.length === 0 && !l3Loading;
@@ -186,60 +197,130 @@ const CascadingSectorPicker = React.memo(function CascadingSectorPicker({
         이 종목의 섹터 정보가 없습니다. L1(Sector)부터 순서대로 선택하세요.
       </Text>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={cascadeStyles.scrollContent}>
-
-        {/* L1 선택 */}
-        <SectorLevelSection
-          levelLabel={`L1 · ${levelLabel(1)}`}
-          sectors={l1List}
-          selected={selectedL1}
-          loading={l1Loading}
-          onSelect={handleSelectL1}
+      {/* [023] 검색 입력 필드 */}
+      <View style={cascadeStyles.searchRow}>
+        <TextInput
+          style={cascadeStyles.searchInput}
+          placeholder="섹터 검색..."
+          placeholderTextColor="#737688"
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
         />
-
-        {/* L2 선택 (L1 선택 후 노출) */}
-        {selectedL1 !== null && (
-          <SectorLevelSection
-            levelLabel={`L2 · ${levelLabel(2)}`}
-            sectors={l2List}
-            selected={selectedL2}
-            loading={l2Loading}
-            emptyMessage="하위 항목 없음 — 현재 선택으로 확정할 수 있습니다"
-            onSelect={handleSelectL2}
-          />
-        )}
-
-        {/* L3 선택 (L2 선택 후 노출) */}
-        {selectedL2 !== null && (
-          <SectorLevelSection
-            levelLabel={`L3 · ${levelLabel(3)}`}
-            sectors={l3List}
-            selected={selectedL3}
-            loading={l3Loading}
-            emptyMessage="하위 항목 없음 — 현재 선택으로 확정할 수 있습니다"
-            onSelect={handleSelectL3}
-          />
-        )}
-
-        {/* L4 선택 (L3 선택 후 노출) */}
-        {selectedL3 !== null && (
-          <SectorLevelSection
-            levelLabel={`L4 · ${levelLabel(4)}`}
-            sectors={l4List}
-            selected={null}
-            loading={l4Loading}
-            emptyMessage="하위 항목 없음 — 현재 선택으로 확정할 수 있습니다"
-            onSelect={handleSelectL4}
-          />
-        )}
-
-        {/* 현재 선택으로 확정 버튼 (하위 없거나 로딩 완료 후) */}
-        {confirmable !== null && (canConfirmAtL1 || canConfirmAtL2 || canConfirmAtL3) && (
-          <TouchableOpacity style={cascadeStyles.confirmBtn} onPress={handleConfirmCurrent}>
-            <Text style={cascadeStyles.confirmBtnText}>
-              '{confirmable.name}'(으)로 확정
-            </Text>
+        {query.length > 0 && (
+          <TouchableOpacity style={cascadeStyles.clearBtn} onPress={clearQuery} activeOpacity={0.7}>
+            <Text style={cascadeStyles.clearBtnText}>✕</Text>
           </TouchableOpacity>
+        )}
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={cascadeStyles.scrollContent}>
+        {isSearchMode ? (
+          /* 검색 모드 — 검색 결과 리스트 */
+          <>
+            {searchLoading && (
+              <ActivityIndicator size="small" color="#003ec7" style={{ marginVertical: 12 }} />
+            )}
+            {searchError && (
+              <Text style={cascadeStyles.emptyMessage}>섹터 목록을 불러오지 못했습니다</Text>
+            )}
+            {!searchLoading && !searchError && searchResults.length === 0 && (
+              <Text style={cascadeStyles.emptyMessage}>검색 결과 없음</Text>
+            )}
+            {searchResults.map((result) => (
+              <TouchableOpacity
+                key={result.sector.id}
+                style={cascadeStyles.searchResultItem}
+                onPress={() => handleSearchSelect(result.sector)}
+                activeOpacity={0.7}
+              >
+                <View style={cascadeStyles.searchResultLeft}>
+                  <View style={cascadeStyles.breadcrumbRow}>
+                    {result.breadcrumb.map((item, index) => {
+                      const isLast = index === result.breadcrumb.length - 1;
+                      return (
+                        <React.Fragment key={item.id}>
+                          {index > 0 && (
+                            <Text style={cascadeStyles.breadcrumbSeparator}>{' > '}</Text>
+                          )}
+                          <Text
+                            style={[
+                              cascadeStyles.breadcrumbItem,
+                              isLast && cascadeStyles.breadcrumbItemMatched,
+                            ]}
+                          >
+                            {item.name}
+                          </Text>
+                        </React.Fragment>
+                      );
+                    })}
+                  </View>
+                </View>
+                <View style={cascadeStyles.levelBadge}>
+                  <Text style={cascadeStyles.levelBadgeText}>L{result.sector.level}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </>
+        ) : (
+          /* cascading 모드 */
+          <>
+            {/* L1 선택 */}
+            <SectorLevelSection
+              levelLabel={`L1 · ${levelLabel(1)}`}
+              sectors={l1List}
+              selected={selectedL1}
+              loading={l1Loading}
+              onSelect={handleSelectL1}
+            />
+
+            {/* L2 선택 (L1 선택 후 노출) */}
+            {selectedL1 !== null && (
+              <SectorLevelSection
+                levelLabel={`L2 · ${levelLabel(2)}`}
+                sectors={l2List}
+                selected={selectedL2}
+                loading={l2Loading}
+                emptyMessage="하위 항목 없음 — 현재 선택으로 확정할 수 있습니다"
+                onSelect={handleSelectL2}
+              />
+            )}
+
+            {/* L3 선택 (L2 선택 후 노출) */}
+            {selectedL2 !== null && (
+              <SectorLevelSection
+                levelLabel={`L3 · ${levelLabel(3)}`}
+                sectors={l3List}
+                selected={selectedL3}
+                loading={l3Loading}
+                emptyMessage="하위 항목 없음 — 현재 선택으로 확정할 수 있습니다"
+                onSelect={handleSelectL3}
+              />
+            )}
+
+            {/* L4 선택 (L3 선택 후 노출) */}
+            {selectedL3 !== null && (
+              <SectorLevelSection
+                levelLabel={`L4 · ${levelLabel(4)}`}
+                sectors={l4List}
+                selected={null}
+                loading={l4Loading}
+                emptyMessage="하위 항목 없음 — 현재 선택으로 확정할 수 있습니다"
+                onSelect={handleSelectL4}
+              />
+            )}
+
+            {/* 현재 선택으로 확정 버튼 (하위 없거나 로딩 완료 후) */}
+            {confirmable !== null && (canConfirmAtL1 || canConfirmAtL2 || canConfirmAtL3) && (
+              <TouchableOpacity style={cascadeStyles.confirmBtn} onPress={handleConfirmCurrent}>
+                <Text style={cascadeStyles.confirmBtnText}>
+                  '{confirmable.name}'(으)로 확정
+                </Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
       </ScrollView>
 
@@ -325,11 +406,81 @@ const cascadeStyles = StyleSheet.create({
   subtitle: {
     fontSize: 13,
     color: '#737688',
-    marginBottom: 16,
+    marginBottom: 8,
     lineHeight: 18,
   },
+  // [023] 검색 입력 필드
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f4ff',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#dce9ff',
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#0b1c30',
+    paddingVertical: 10,
+  },
+  clearBtn: {
+    padding: 6,
+  },
+  clearBtnText: {
+    fontSize: 12,
+    color: '#737688',
+    fontWeight: '700',
+  },
+  // [023] 검색 결과 항목
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5eeff',
+    backgroundColor: '#ffffff',
+  },
+  searchResultLeft: {
+    flex: 1,
+    marginRight: 8,
+  },
+  breadcrumbRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+  breadcrumbItem: {
+    fontSize: 13,
+    color: '#737688',
+  },
+  breadcrumbItemMatched: {
+    fontWeight: '700',
+    color: '#003ec7',
+  },
+  breadcrumbSeparator: {
+    fontSize: 12,
+    color: '#b0b3c6',
+  },
+  levelBadge: {
+    backgroundColor: '#dce9ff',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  levelBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#003ec7',
+  },
   scrollContent: {
-    gap: 16,
+    gap: 10,
     paddingBottom: 16,
   },
   levelSection: {

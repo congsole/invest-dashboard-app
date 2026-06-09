@@ -49,6 +49,24 @@ export async function getSectors(params?: GetSectorsParams): Promise<Sector[]> {
 }
 
 // ────────────────────────────────────────────
+// 전체 섹터 캐시 조회
+//
+// 앱 세션 내 전체 섹터(~273개)를 1회만 로드하여 메모리에 캐시한다.
+// useSectorSearch 훅에서 클라이언트 사이드 검색에 사용.
+// ────────────────────────────────────────────
+
+let _sectorCache: Sector[] | null = null;
+
+export async function getAllSectorsWithCache(): Promise<Sector[]> {
+  if (_sectorCache !== null) {
+    return _sectorCache;
+  }
+  const sectors = await getSectors();
+  _sectorCache = sectors;
+  return sectors;
+}
+
+// ────────────────────────────────────────────
 // 섹터 breadcrumb 조회 (RPC)
 //
 // 주어진 sector_id(보통 L4)에서 L1까지 조상 경로를 1회 호출로 반환.

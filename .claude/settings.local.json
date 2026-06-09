@@ -48,7 +48,8 @@
       "Bash(kill 22313)",
       "Bash(kill 22856)",
       "Bash(eas --version)",
-      "Bash(npx eas:*)"
+      "Bash(npx eas:*)",
+      "Bash(cat app/supabase/migrations/*sector*)"
     ]
   }
 }
