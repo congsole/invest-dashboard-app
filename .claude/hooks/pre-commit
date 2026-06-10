@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# docs/planning/ 또는 docs/design/ 변경이 포함된 커밋만 체크한다.
+# 일반 커밋은 체크 없이 통과.
+
+staged_files=$(git diff --cached --name-only)
+
+if ! echo "$staged_files" | grep -qE '^docs/(planning|design)/'; then
+  exit 0
+fi
+
+ROOT=$(git rev-parse --show-toplevel)
+errors=()
+
+# 1. claude CLI 설치 확인
+CLAUDE=/Users/imsi/.volta/bin/claude
+if [ ! -x "$CLAUDE" ]; then
+  errors+=("claude CLI가 설치되어 있지 않거나 경로가 잘못되었습니다 ($CLAUDE)")
+fi
+
+# 2. pipeline-prompt.md 존재 확인
+if [ ! -f "$ROOT/.claude/pipeline-prompt.md" ]; then
+  errors+=(".claude/pipeline-prompt.md 파일이 없습니다")
+fi
+
+# 3. supabase link 확인 (project-ref 파일 존재)
+if [ ! -f "$ROOT/app/supabase/.temp/project-ref" ]; then
+  errors+=("Supabase CLI가 연결되지 않았습니다 (cd app && supabase link --project-ref {ref})")
+fi
+
+# 4. app/.env.test 존재 확인
+if [ ! -f "$ROOT/app/.env.test" ]; then
+  errors+=("app/.env.test 파일이 없습니다")
+else
+  # 5. SUPABASE_SERVICE_KEY 값 확인
+  SERVICE_KEY=$(grep -E '^SUPABASE_SERVICE_KEY=' "$ROOT/app/.env.test" | cut -d'=' -f2-)
+  if [ -z "$SERVICE_KEY" ]; then
+    errors+=("app/.env.test의 SUPABASE_SERVICE_KEY가 비어있습니다 (Supabase 대시보드 → Settings → API → service_role)")
+  fi
+fi
+
+# 결과 출력
+if [ ${#errors[@]} -gt 0 ]; then
+  echo ""
+  echo "❌ 파이프라인 사전 체크 실패 — 커밋이 차단되었습니다."
+  echo ""
+  for err in "${errors[@]}"; do
+    echo "  - $err"
+  done
+  echo ""
+  echo "위 항목을 해결한 후 다시 커밋하세요."
+  echo "파이프라인과 무관한 커밋이라면 docs/planning/, docs/design/ 파일을 스테이징에서 제외하세요."
+  echo ""
+  exit 1
+fi

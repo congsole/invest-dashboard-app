@@ -128,7 +128,12 @@ issue.md의 구현 현황 체크박스(`[x]` / `[ ]`)를 보고 완료된 단계
 `claude -p`로 실행한 headless 인스턴스는 메인 Claude와 동일하게 Agent 툴로 서브에이전트를 spawn할 수 있음을 확인했다. (Agent spawn 제한은 에이전트가 spawn한 하위 에이전트에만 적용됨)
 
 #### 트리거
-`.git/hooks/post-commit`에 구현. `docs/planning/` 또는 `docs/design/` 변경이 포함된 커밋에만 반응한다.
+`.claude/hooks/post-commit`에 구현. `docs/planning/` 또는 `docs/design/` 변경이 포함된 커밋에만 반응한다.
+
+훅은 git이 추적하는 `.claude/hooks/`에 두고 `core.hooksPath`로 연결한다. 새 머신에서는 클론 후 한 번만 실행:
+```bash
+git config core.hooksPath .claude/hooks
+```
 
 동시 실행 방지: `.claude/pipeline.lock/` 디렉토리 락. 파이프라인 실행 중 새 docs 커밋이 들어오면 건너뛰고 알림만 보낸다 (완료 후 `resume-pipeline.sh`로 재개). 동시 실행 시 이슈 번호 채번 레이스, status log 덮어쓰기, `supabase db push` 충돌이 발생하기 때문. 프로세스가 죽어 남은 stale 락은 PID 검사로 자동 회수된다.
 
@@ -145,7 +150,8 @@ git commit (docs/planning/ 또는 docs/design/ 변경)
 #### 관련 파일
 | 파일 | 역할 |
 |------|------|
-| `.git/hooks/post-commit` | 트리거 — 변경 감지 및 파이프라인 실행 |
+| `.claude/hooks/post-commit` | 트리거 — 변경 감지 및 파이프라인 실행 (`core.hooksPath`로 연결) |
+| `.claude/hooks/pre-commit` | 파이프라인 사전 체크 (claude CLI, supabase link, .env.test 확인) |
 | `.claude/pipeline-prompt.md` | 프롬프트 템플릿 (`{{COMMIT_HASH}}`, `{{COMMIT_MSG}}`, `{{CHANGED}}` 변수) |
 | `.claude/notify.sh` | Telegram + macOS 알림 전송 (`.env.local`에서 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 로드) |
 | `.claude/watch-pipeline.sh` | 실시간 현황 터미널 (`tail -f logs/pipeline-status.log`) |

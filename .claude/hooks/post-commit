@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# docs/planning/ 또는 docs/design/ 변경 여부 확인
+changed_files=$(git diff-tree --no-commit-id -r --name-only HEAD)
+
+if echo "$changed_files" | grep -qE '^docs/(planning|design)/'; then
+  ROOT=$(git rev-parse --show-toplevel)
+  LOG="$ROOT/.claude/pipeline.log"
+  STATUS_LOG="$ROOT/logs/pipeline-status.log"
+  CLAUDE=/Users/imsi/.volta/bin/claude
+  COMMIT_HASH=$(git rev-parse HEAD)
+  COMMIT_MSG=$(git log -1 --format="%s")
+  CHANGED=$(echo "$changed_files" | grep -E '^docs/(planning|design)/' | tr '\n' ' ')
+
+  # 동시 실행 방지 락 (mkdir은 원자적)
+  # 동시에 돌면 이슈 번호 채번 레이스, status log 덮어쓰기, supabase db push 충돌이 발생한다
+  LOCKDIR="$ROOT/.claude/pipeline.lock"
+  if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    LOCK_PID=$(cat "$LOCKDIR/pid" 2>/dev/null)
+    if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
+      echo ""
+      echo "⏭️  파이프라인이 이미 실행 중 (PID $LOCK_PID) — 이번 커밋은 건너뜁니다."
+      echo "   완료 후 bash .claude/resume-pipeline.sh 로 이어서 실행하세요."
+      echo ""
+      bash "$ROOT/.claude/notify.sh" "⏭️ 파이프라인 실행 중(PID $LOCK_PID) — 커밋 ${COMMIT_HASH:0:7} 건너뜀. 완료 후 resume-pipeline.sh로 재개하세요."
+      exit 0
+    fi
+    # 죽은 프로세스가 남긴 stale 락 → 회수
+    rm -rf "$LOCKDIR"
+    mkdir "$LOCKDIR"
+  fi
+
+  # 상태 로그 초기화
+  echo "" > "$STATUS_LOG"
+
+  echo ""
+  echo "📋 docs/planning/ 또는 docs/design/ 변경 감지 — 전체 파이프라인 실행 중..."
+  echo "   커밋: $COMMIT_HASH ($COMMIT_MSG)"
+  echo "   변경 파일: $CHANGED"
+  echo "   현황 로그: logs/pipeline-status.log"
+  echo "   전체 로그: .claude/pipeline.log"
+  echo ""
+
+  bash "$ROOT/.claude/notify.sh" "🚀 파이프라인 시작: $COMMIT_MSG"
+
+  # 실시간 현황 터미널 창 열기
+  osascript -e "tell application \"Terminal\" to do script \"bash '$ROOT/.claude/watch-pipeline.sh'\" activate"
+
+  # 프롬프트 파일에서 읽어서 변수 치환
+  PROMPT_FILE="$ROOT/.claude/pipeline-prompt.md"
+  PROMPT=$(sed -e "s|{{COMMIT_HASH}}|$COMMIT_HASH|g" \
+               -e "s|{{COMMIT_MSG}}|$COMMIT_MSG|g" \
+               -e "s|{{CHANGED}}|$CHANGED|g" \
+               "$PROMPT_FILE")
+
+  # 파이프라인 종료 시 macOS 알림을 보내는 wrapper
+  # stream-json은 실시간 스트리밍되므로 pipeline.log에 바로 기록됨
+  (
+    echo $BASHPID > "$LOCKDIR/pid"
+    "$CLAUDE" -p "$PROMPT" \
+      --dangerously-skip-permissions \
+      --verbose \
+      --output-format stream-json \
+      < /dev/null > "$LOG" 2>&1
+    EXIT_CODE=$?
+    rm -rf "$LOCKDIR"
+    if [ $EXIT_CODE -eq 0 ]; then
+      bash "$ROOT/.claude/notify.sh" "✅ 파이프라인 완료"
+    else
+      bash "$ROOT/.claude/notify.sh" "❌ 파이프라인 에러로 중단됨 (exit $EXIT_CODE) — .claude/pipeline.log 확인"
+    fi
+  ) &
+
+  PIPELINE_PID=$!
+  disown $PIPELINE_PID
+  echo "   PID: $PIPELINE_PID"
+  echo "   실시간 현황: tail -f logs/pipeline-status.log"
+  echo ""
+fi
