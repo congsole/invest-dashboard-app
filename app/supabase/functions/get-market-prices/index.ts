@@ -32,7 +32,37 @@ function isCacheValid(key: string): boolean {
   return t !== undefined && Date.now() - t < CACHE_TTL_MS;
 }
 
-// Twelve Data API로 주식 현재가 조회 (한국주식 + 미국주식)
+// 네이버 폴링 API로 한국주식 현재가 조회
+// (Twelve Data 무료 플랜이 KRX 심볼 미지원 — cron-collect-prices와 동일 사유로 네이버 사용)
+async function fetchKoreanStockPrices(
+  tickers: TickerRequest[],
+): Promise<Map<string, { price: number; currency: string; fetched_at: string }>> {
+  const result = new Map<string, { price: number; currency: string; fetched_at: string }>();
+  if (tickers.length === 0) return result;
+
+  // SERVICE_ITEM:코드1,코드2,... 형식으로 복수 종목 동시 조회 가능
+  const symbols = tickers.map((t) => t.ticker).join(',');
+  const url = `https://polling.finance.naver.com/api/realtime?query=SERVICE_ITEM:${encodeURIComponent(symbols)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`네이버 폴링 API 오류: ${res.status}`);
+  }
+
+  const data = await res.json();
+  const fetchedAt = new Date().toISOString();
+  const datas: { cd?: string; nv?: number }[] = data?.result?.areas?.[0]?.datas ?? [];
+
+  for (const d of datas) {
+    if (d.cd && typeof d.nv === 'number' && d.nv > 0) {
+      result.set(d.cd, { price: d.nv, currency: 'KRW', fetched_at: fetchedAt });
+    }
+  }
+
+  return result;
+}
+
+// Twelve Data API로 미국주식 현재가 조회
 async function fetchStockPrices(
   tickers: TickerRequest[],
   apiKey: string,
@@ -58,7 +88,7 @@ async function fetchStockPrices(
     if (data.price && !isNaN(parseFloat(data.price))) {
       result.set(t.ticker, {
         price: parseFloat(data.price),
-        currency: t.asset_type === 'korean_stock' ? 'KRW' : 'USD',
+        currency: 'USD',
         fetched_at: fetchedAt,
       });
     }
@@ -68,7 +98,7 @@ async function fetchStockPrices(
       if (entry && entry.price && !isNaN(parseFloat(entry.price))) {
         result.set(t.ticker, {
           price: parseFloat(entry.price),
-          currency: t.asset_type === 'korean_stock' ? 'KRW' : 'USD',
+          currency: 'USD',
           fetched_at: fetchedAt,
         });
       }
@@ -183,7 +213,8 @@ serve(async (req: Request) => {
 
   // 캐시에서 먼저 확인
   const prices: PriceResult[] = [];
-  const needFetchStock: TickerRequest[] = [];
+  const needFetchUs: TickerRequest[] = [];
+  const needFetchKr: TickerRequest[] = [];
   const needFetchCrypto: TickerRequest[] = [];
 
   for (const t of tickers) {
@@ -200,48 +231,41 @@ serve(async (req: Request) => {
       });
     } else if (t.asset_type === 'crypto') {
       needFetchCrypto.push(t);
+    } else if (t.asset_type === 'korean_stock') {
+      needFetchKr.push(t);
     } else {
-      needFetchStock.push(t);
+      needFetchUs.push(t);
     }
   }
 
-  // 주식 현재가 조회
-  if (needFetchStock.length > 0) {
+  // 조회 성공 시 캐시 갱신, 실패 시 만료된 캐시 값으로 대체
+  async function fetchAndMerge(
+    reqs: TickerRequest[],
+    fetcher: (reqs: TickerRequest[]) => Promise<Map<string, { price: number; currency: string; fetched_at: string }>>,
+    label: string,
+  ) {
+    if (reqs.length === 0) return;
+    let fetched = new Map<string, { price: number; currency: string; fetched_at: string }>();
     try {
-      const stockPrices = await fetchStockPrices(needFetchStock, twelveDataApiKey);
-      for (const t of needFetchStock) {
-        const entry = stockPrices.get(t.ticker);
-        const cacheKey = `${t.asset_type}:${t.ticker}`;
-        if (entry) {
-          priceCache.set(cacheKey, entry);
-          cacheTimes.set(cacheKey, Date.now());
-          prices.push({
-            ticker: t.ticker,
-            asset_type: t.asset_type,
-            price: entry.price,
-            currency: entry.currency,
-            fetched_at: entry.fetched_at,
-            is_cached: false,
-          });
-        } else {
-          // 조회 실패: 캐시 값이 있으면 그것으로 대체
-          const cached = priceCache.get(cacheKey);
-          if (cached) {
-            prices.push({
-              ticker: t.ticker,
-              asset_type: t.asset_type,
-              price: cached.price,
-              currency: cached.currency,
-              fetched_at: cached.fetched_at,
-              is_cached: true,
-            });
-          }
-        }
-      }
+      fetched = await fetcher(reqs);
     } catch (err) {
-      // 외부 API 실패 시 캐시 값으로 대체
-      for (const t of needFetchStock) {
-        const cacheKey = `${t.asset_type}:${t.ticker}`;
+      console.error(`${label} 오류:`, err);
+    }
+    for (const t of reqs) {
+      const entry = fetched.get(t.ticker);
+      const cacheKey = `${t.asset_type}:${t.ticker}`;
+      if (entry) {
+        priceCache.set(cacheKey, entry);
+        cacheTimes.set(cacheKey, Date.now());
+        prices.push({
+          ticker: t.ticker,
+          asset_type: t.asset_type,
+          price: entry.price,
+          currency: entry.currency,
+          fetched_at: entry.fetched_at,
+          is_cached: false,
+        });
+      } else {
         const cached = priceCache.get(cacheKey);
         if (cached) {
           prices.push({
@@ -254,60 +278,14 @@ serve(async (req: Request) => {
           });
         }
       }
-      console.error('Twelve Data API 오류:', err);
     }
   }
 
-  // 코인 현재가 조회
-  if (needFetchCrypto.length > 0) {
-    try {
-      const cryptoPrices = await fetchCryptoPrices(needFetchCrypto, coinGeckoApiKey);
-      for (const t of needFetchCrypto) {
-        const entry = cryptoPrices.get(t.ticker);
-        const cacheKey = `${t.asset_type}:${t.ticker}`;
-        if (entry) {
-          priceCache.set(cacheKey, entry);
-          cacheTimes.set(cacheKey, Date.now());
-          prices.push({
-            ticker: t.ticker,
-            asset_type: t.asset_type,
-            price: entry.price,
-            currency: entry.currency,
-            fetched_at: entry.fetched_at,
-            is_cached: false,
-          });
-        } else {
-          const cached = priceCache.get(cacheKey);
-          if (cached) {
-            prices.push({
-              ticker: t.ticker,
-              asset_type: t.asset_type,
-              price: cached.price,
-              currency: cached.currency,
-              fetched_at: cached.fetched_at,
-              is_cached: true,
-            });
-          }
-        }
-      }
-    } catch (err) {
-      for (const t of needFetchCrypto) {
-        const cacheKey = `${t.asset_type}:${t.ticker}`;
-        const cached = priceCache.get(cacheKey);
-        if (cached) {
-          prices.push({
-            ticker: t.ticker,
-            asset_type: t.asset_type,
-            price: cached.price,
-            currency: cached.currency,
-            fetched_at: cached.fetched_at,
-            is_cached: true,
-          });
-        }
-      }
-      console.error('CoinGecko API 오류:', err);
-    }
-  }
+  await Promise.all([
+    fetchAndMerge(needFetchUs, (reqs) => fetchStockPrices(reqs, twelveDataApiKey), 'Twelve Data API'),
+    fetchAndMerge(needFetchKr, (reqs) => fetchKoreanStockPrices(reqs), '네이버 폴링 API'),
+    fetchAndMerge(needFetchCrypto, (reqs) => fetchCryptoPrices(reqs, coinGeckoApiKey), 'CoinGecko API'),
+  ]);
 
   return new Response(
     JSON.stringify({ prices }),
