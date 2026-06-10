@@ -41,7 +41,7 @@ npm install --save-dev jest ts-jest @types/jest
 {
   "scripts": {
     "test": "jest",
-    "test:integration": "jest --testPathPattern=tests/integration"
+    "test:integration": "jest --testPathPatterns=tests/integration"
   },
   "jest": {
     "preset": "ts-jest",
@@ -65,33 +65,29 @@ npm install --save-dev jest ts-jest @types/jest
 jest.setTimeout(30000)
 ```
 
-### 3. 환경변수 확인 및 설정
+### 3. 로컬 Supabase 준비
 
-다음 순서로 `.env.test`를 준비한다:
+> 테스트는 **운영 DB가 아니라 로컬 Supabase**(Docker)를 대상으로 실행한다.
+> `app/.env.test`는 로컬 URL(`http://127.0.0.1:54321`)과 Supabase CLI의 공개 데모 키를
+> 가리키도록 이미 구성되어 있다 — 원격 운영 키로 되돌리지 않는다.
 
-#### 3-1. 파일이 없으면 생성
-`app/` 디렉토리의 환경 변수 파일을 모두 확인하여 Supabase 관련 값을 찾아 `app/.env.test`를 생성한다:
+#### 3-1. 로컬 스택 기동 확인
+```bash
+cd app
+supabase status >/dev/null 2>&1 || supabase start
 ```
-SUPABASE_URL={찾은 URL 값}
-SUPABASE_ANON_KEY={찾은 anon/publishable key 값}
-SUPABASE_SERVICE_KEY=
-```
-
-#### 3-2. SUPABASE_SERVICE_KEY 확인
-`app/.env.test`의 `SUPABASE_SERVICE_KEY`가 비어있는지 확인한다.
-비어있으면 `06-backend-test.md`에 아래 내용을 기록하고 **테스트를 스킵**한다 (데드락 방지 — headless 모드에서는 사용자 응답을 받을 수 없음):
+Docker가 꺼져 있어 시작이 불가하면 `06-backend-test.md`에 아래를 기록하고 **테스트를 스킵**한다 (데드락 방지 — headless 모드에서는 사용자 응답을 받을 수 없음):
 
 ```
-⚠️ 백엔드 테스트 스킵 — SUPABASE_SERVICE_KEY 미설정
-
-app/.env.test 파일의 SUPABASE_SERVICE_KEY를 채워주세요:
-  Supabase 대시보드 → Settings → API → service_role (secret key)
-
-service_role 키는 RLS를 우회하여 테스트 데이터 정리에 사용됩니다.
-설정 후 resume-pipeline.sh로 재실행해주세요.
+⚠️ 백엔드 테스트 스킵 — Docker/로컬 Supabase 미기동
+Docker Desktop을 실행한 후 resume-pipeline.sh로 재실행해주세요.
 ```
 
-비어있지 않으면 다음 단계로 진행한다.
+#### 3-2. 로컬 DB 초기화
+```bash
+supabase db reset   # 전체 마이그레이션 + seed.sql을 빈 DB에 처음부터 적용
+```
+reset 실패는 마이그레이션 SQL 자체의 문제다 (타임스탬프 중복, 객체 충돌 등) — SQL을 수정하고 재시도한다.
 
 ### 4. 외부 서비스 연동 Smoke Test
 
@@ -225,19 +221,38 @@ describe('RLS 검증', () => {
 
 ### 6. 테스트 실행
 
+이슈 테스트만이 아니라 **전체 통합 테스트 스위트**를 실행한다. 이번 이슈의 마이그레이션이
+기존 기능을 회귀시키지 않았는지 확인하는 것이 이 단계의 핵심 게이트다 — 실제로 이슈 025가
+메모 RPC 응답의 `name_en` 필드를 누락시킨 회귀가 전체 스위트 미실행 탓에 운영까지 나간 전례가 있다.
+
 ```bash
 cd app
-npx jest --testPathPattern=tests/integration/{issue-slug} --verbose 2>&1
+npm run test:integration 2>&1
 ```
+
+이슈 테스트 디버깅 중에는 단일 파일 실행(`npx jest --testPathPatterns=tests/integration/{issue-slug}`)을
+써도 되지만, **최종 합격 판정은 반드시 전체 스위트**로 한다.
+
+### 6.5. 합격 시에만 원격(운영) DB 반영
+
+전체 스위트 합격 후 마이그레이션을 운영 DB에 push한다. **파이프라인에서 유일한 원격 쓰기 지점**이다:
+
+```bash
+supabase db push --yes
+```
+
+push 실패 시 에러를 기록하고 사용자에게 escalate한다 (로컬 검증은 통과한 상태이므로 원격 마이그레이션 이력 불일치일 가능성이 높다 — `supabase migration list`로 확인).
 
 ### 7. 결과 분석 및 수정
 
-**통과 시**: 결과 기록 후 완료.
+**통과 시**: 6.5 원격 push까지 마친 후 결과 기록.
 
 **실패 시**: 실패 원인을 분석한다:
 - 테스트 코드 오류 (잘못된 기대값, 잘못된 API 호출) → 테스트 수정
 - 서비스 코드 버그 (타입 불일치, 잘못된 쿼리) → `app/services/` 코드 수정
-- DB 스키마/RLS 문제 → 마이그레이션 SQL 수정 및 재적용
+- DB 스키마/RLS 문제 → 마이그레이션 SQL 수정 후 `supabase db reset`으로 재적용
+- **이번 이슈와 무관한 기존 테스트가 깨진 경우** → 이번 마이그레이션이 일으킨 회귀인지 먼저 의심한다.
+  기존 테스트가 옛 스키마를 단언하는 스테일 케이스로 판명되면 테스트를 현행 스키마에 맞게 갱신한다.
 
 수정 후 6번으로 돌아가 재실행. 최대 3회.
 
@@ -249,8 +264,9 @@ npx jest --testPathPattern=tests/integration/{issue-slug} --verbose 2>&1
 # 백엔드 통합 테스트
 
 ## 테스트 환경
-- Supabase URL: {project-ref}.supabase.co
+- 대상: 로컬 Supabase (supabase db reset 후 전체 스위트)
 - 테스트 파일: app/tests/integration/{issue-slug}.test.ts
+- 원격 push: {완료 / 실패 사유}
 
 ## 테스트 결과
 

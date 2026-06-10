@@ -122,7 +122,8 @@ async function createTestStock(ticker: string, sectorId: number | null = 1): Pro
     .from('stocks')
     .insert({
       ticker: `${ticker}_${RUN_ID}`,
-      asset_type: 'korean_stock',
+      market: 'KR',
+      currency: 'KRW',
       name: `테스트종목_${ticker}_${RUN_ID}`,
       sector_id: sectorId,
     })
@@ -249,7 +250,7 @@ describe('메모 기본 CRUD', () => {
     const { data, error } = await userClient
       .from('memos')
       .select(
-        '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, asset_type)), memo_sectors(sector_id, sectors(id, code, name))'
+        '*, memo_stocks(stock_id, goal_price, stocks(id, ticker, name, market)), memo_sectors(sector_id, sectors(id, code, name))'
       )
       .eq('id', created.id)
       .single();
@@ -479,10 +480,9 @@ describe('list_memos 필터', () => {
   // ──────────────────────────────────────────
   // 2-2. 종목 필터 (직접 연결)
   // ──────────────────────────────────────────
-  it('p_stock_id 필터 시 해당 종목이 직접 연결된 메모만 반환된다', async () => {
+  it('p_stock_ids 필터 시 해당 종목이 연결된 메모만 반환된다', async () => {
     const { data, error } = await userClient.rpc('list_memos', {
-      p_stock_id: stockIdA,
-      p_include_trade_events: false,
+      p_stock_ids: [stockIdA],
     });
 
     expect(error).toBeNull();
@@ -495,9 +495,9 @@ describe('list_memos 필터', () => {
   // ──────────────────────────────────────────
   // 2-3. 섹터 필터
   // ──────────────────────────────────────────
-  it('p_sector_id 필터 시 해당 섹터가 연결된 메모만 반환된다', async () => {
+  it('p_sector_ids 필터 시 해당 섹터가 연결된 메모만 반환된다', async () => {
     const { data, error } = await userClient.rpc('list_memos', {
-      p_sector_id: sectorId,
+      p_sector_ids: [sectorId],
     });
 
     expect(error).toBeNull();
@@ -736,7 +736,7 @@ describe('create_trade_event_with_memo', () => {
     // 실제 ticker와 일치하도록 종목 ticker 업데이트
     await adminClient
       .from('stocks')
-      .update({ ticker: `TEWM_${RUN_ID}`, asset_type: 'korean_stock' })
+      .update({ ticker: `TEWM_${RUN_ID}`, market: 'KR' })
       .eq('id', stockId);
 
     const { data, error } = await userClient.rpc('create_trade_event_with_memo', {
@@ -874,7 +874,8 @@ describe('list_memos — 종목 필터 + 매매이벤트 포함', () => {
       .from('stocks')
       .insert({
         ticker,
-        asset_type: 'korean_stock',
+        market: 'KR',
+        currency: 'KRW',
         name: `종목포함테스트_${RUN_ID}`,
         sector_id: null,
       })
@@ -938,27 +939,15 @@ describe('list_memos — 종목 필터 + 매매이벤트 포함', () => {
     createdMemoIds.push(memoViaEventId);
   });
 
-  it('p_include_trade_events = true 시 매매이벤트로 연결된 메모도 포함된다', async () => {
+  // [014] p_include_trade_events 옵션 제거 — 종목 필터는 항상 직접연결 + 매매이벤트 경유를 함께 반환
+  it('p_stock_ids 필터 시 직접 연결 + 매매이벤트로 연결된 메모가 모두 포함된다', async () => {
     const { data, error } = await userClient.rpc('list_memos', {
-      p_stock_id: stockId,
-      p_include_trade_events: true,
+      p_stock_ids: [stockId],
     });
 
     expect(error).toBeNull();
     const ids = data.memos.map((m: any) => m.id);
     expect(ids).toContain(memoDirectStockId);
     expect(ids).toContain(memoViaEventId);
-  });
-
-  it('p_include_trade_events = false 시 직접 연결된 메모만 반환된다', async () => {
-    const { data, error } = await userClient.rpc('list_memos', {
-      p_stock_id: stockId,
-      p_include_trade_events: false,
-    });
-
-    expect(error).toBeNull();
-    const ids = data.memos.map((m: any) => m.id);
-    expect(ids).toContain(memoDirectStockId);
-    expect(ids).not.toContain(memoViaEventId);
   });
 });

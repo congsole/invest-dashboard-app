@@ -144,8 +144,9 @@ max_catalogs = 2
 # [storage.analytics.buckets.my-warehouse]
 
 # Store vector embeddings in S3 for large and durable datasets
+# (이 프로젝트는 미사용 — 로컬 vector 서비스 미구성으로 supabase start가 실패해서 비활성화)
 [storage.vector]
-enabled = true
+enabled = false
 max_buckets = 10
 max_indexes = 5
 

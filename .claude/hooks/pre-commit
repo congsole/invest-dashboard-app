@@ -28,15 +28,17 @@ if [ ! -f "$ROOT/app/supabase/.temp/project-ref" ]; then
   errors+=("Supabase CLI가 연결되지 않았습니다 (cd app && supabase link --project-ref {ref})")
 fi
 
-# 4. app/.env.test 존재 확인
+# 4. app/.env.test 존재 + 로컬 Supabase 지향 확인
 if [ ! -f "$ROOT/app/.env.test" ]; then
-  errors+=("app/.env.test 파일이 없습니다")
-else
-  # 5. SUPABASE_SERVICE_KEY 값 확인
-  SERVICE_KEY=$(grep -E '^SUPABASE_SERVICE_KEY=' "$ROOT/app/.env.test" | cut -d'=' -f2-)
-  if [ -z "$SERVICE_KEY" ]; then
-    errors+=("app/.env.test의 SUPABASE_SERVICE_KEY가 비어있습니다 (Supabase 대시보드 → Settings → API → service_role)")
-  fi
+  errors+=("app/.env.test 파일이 없습니다 (로컬 Supabase URL/데모 키 설정 필요)")
+elif ! grep -q '^SUPABASE_URL=http://127.0.0.1' "$ROOT/app/.env.test"; then
+  errors+=("app/.env.test가 로컬 Supabase(http://127.0.0.1:54321)를 가리키지 않습니다 — 백엔드 테스트는 로컬 대상")
+fi
+
+# 5. Docker 실행 확인 (백엔드 테스트용 로컬 Supabase에 필요)
+DOCKER_BIN=$(command -v docker || echo /Applications/Docker.app/Contents/Resources/bin/docker)
+if ! "$DOCKER_BIN" info > /dev/null 2>&1; then
+  errors+=("Docker가 실행 중이 아닙니다 — 백엔드 테스트용 로컬 Supabase에 필요 (Docker Desktop 실행)")
 fi
 
 # 결과 출력

@@ -8,7 +8,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "jest",
-    "test:integration": "jest --testPathPattern=tests/integration"
+    "test:integration": "jest --testPathPatterns=tests/integration"
   },
   "jest": {
     "preset": "ts-jest",

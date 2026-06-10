@@ -2,14 +2,15 @@
  * [009] 섹터 마스터 및 종목 마스터 데이터 레이어 통합 테스트
  *
  * 테스트 범위:
- *   1. sectors 목록 조회 (12개 시드 확인)
- *   2. upsertStockWithSector — 한국 주식 (kr_sector_map 자동 추천)
- *   3. upsertStockWithSector — 암호화폐 (CRYPTO 고정)
- *   4. upsertStockWithSector — 미국 주식 (GICS 코드 직접 전달)
- *   5. upsertStockWithSector — 중복 등록 (upsert, is_new=false)
- *   6. updateStockSector — 섹터 수동 변경
- *   7. getStock — 단건 조회 (sectors join 포함)
- *   8. RLS 검증 (미인증, 쓰기 정책)
+ *   1. sectors 목록 조회 (L1 12개 시드 확인 — [016] GICS 4단계 확장 반영)
+ *   2. updateStockSector — 섹터 수동 변경
+ *   3. getStock — 단건 조회 (sectors join 포함)
+ *   4. RLS 검증 (미인증, 쓰기 정책)
+ *
+ * [016] 변경 반영:
+ *   - upsert_stock_with_sector / kr_sector_map은 폐기됨 (yfinance 기반
+ *     get_or_recommend_stock_sector로 대체 — 016-sector-gics.test.ts가 커버)
+ *   - stocks.asset_type → market ([012])
  *
  * 필요 환경변수 (app/.env.test):
  *   SUPABASE_URL          — Supabase 프로젝트 URL
@@ -97,10 +98,11 @@ afterAll(async () => {
 // ════════════════════════════════════════════
 
 describe('sectors 목록 조회', () => {
-  it('인증된 사용자가 sectors를 조회하면 12개 행이 반환된다', async () => {
+  it('인증된 사용자가 L1 sectors를 조회하면 12개 행이 반환된다', async () => {
     const { data, error } = await userClient
       .from('sectors')
       .select('*')
+      .eq('level', 1)
       .order('id', { ascending: true });
 
     expect(error).toBeNull();
@@ -108,10 +110,11 @@ describe('sectors 목록 조회', () => {
     expect(data!.length).toBe(12);
   });
 
-  it('id 1~12가 모두 존재한다', async () => {
+  it('L1 id 1~12가 모두 존재한다 ([016] GICS 확장 후에도 L1 시드 유지)', async () => {
     const { data, error } = await userClient
       .from('sectors')
       .select('id, code, name')
+      .eq('level', 1)
       .order('id', { ascending: true });
 
     expect(error).toBeNull();
@@ -153,176 +156,54 @@ describe('sectors 목록 조회', () => {
 });
 
 // ════════════════════════════════════════════
-// 2. upsert_stock_with_sector RPC
+// 2. updateStockSector (섹터 수동 변경)
 // ════════════════════════════════════════════
+// [016] upsert_stock_with_sector / kr_sector_map RPC 테스트는 폐기 —
+//       yfinance 기반 get_or_recommend_stock_sector는 016-sector-gics.test.ts가 커버
 
-describe('upsert_stock_with_sector RPC', () => {
-  // 한국 주식 — kr_sector_map 자동 추천
-  it('한국 주식 등록 시 kr_sector_map 기반 섹터가 자동 추천된다', async () => {
-    const ticker = `KR${RUN_ID}`;
-
-    const { data, error } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: ticker,
-      p_asset_type: 'korean_stock',
-      p_name: '삼성전자',
-      p_naver_industry: '반도체',
-    });
-
-    expect(error).toBeNull();
-    expect(data).not.toBeNull();
-    expect(data.ticker).toBe(ticker);
-    expect(data.asset_type).toBe('korean_stock');
-    expect(data.is_new).toBe(true);
-    // '반도체' → IT(id=1)
-    expect(data.sector_id).toBe(1);
-    expect(data.recommended_sector).not.toBeNull();
-    expect(data.recommended_sector.code).toBe('IT');
-
-    createdStockIds.push(data.id);
-  });
-
-  // 암호화폐 — CRYPTO(id=12) 고정
-  it('암호화폐 등록 시 CRYPTO 섹터가 자동 지정된다', async () => {
-    const ticker = `BTC${RUN_ID}`;
-
-    const { data, error } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: ticker,
-      p_asset_type: 'crypto',
-      p_name: '비트코인',
-      p_naver_industry: null,
-    });
-
-    expect(error).toBeNull();
-    expect(data.ticker).toBe(ticker);
-    expect(data.asset_type).toBe('crypto');
-    expect(data.is_new).toBe(true);
-    expect(data.sector_id).toBe(12);
-    expect(data.recommended_sector).not.toBeNull();
-    expect(data.recommended_sector.code).toBe('CRYPTO');
-
-    createdStockIds.push(data.id);
-  });
-
-  // 미국 주식 — GICS 코드 직접 전달
-  it('미국 주식 등록 시 p_naver_industry에 GICS 코드 전달하면 섹터가 매핑된다', async () => {
-    const ticker = `AAPL${RUN_ID}`;
-
-    const { data, error } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: ticker,
-      p_asset_type: 'us_stock',
-      p_name: 'Apple Inc.',
-      p_naver_industry: 'IT',
-    });
-
-    expect(error).toBeNull();
-    expect(data.ticker).toBe(ticker);
-    expect(data.asset_type).toBe('us_stock');
-    expect(data.is_new).toBe(true);
-    // 'IT' → id=1
-    expect(data.sector_id).toBe(1);
-    expect(data.recommended_sector.code).toBe('IT');
-
-    createdStockIds.push(data.id);
-  });
-
-  // 미국 주식 — naver_industry 없이 등록 시 섹터 null
-  it('미국 주식 등록 시 p_naver_industry 미전달이면 sector_id가 null이다', async () => {
-    const ticker = `MSFT${RUN_ID}`;
-
-    const { data, error } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: ticker,
-      p_asset_type: 'us_stock',
-      p_name: 'Microsoft Corp.',
-      p_naver_industry: null,
-    });
-
-    expect(error).toBeNull();
-    expect(data.sector_id).toBeNull();
-    expect(data.recommended_sector).toBeNull();
-    expect(data.is_new).toBe(true);
-
-    createdStockIds.push(data.id);
-  });
-
-  // 중복 등록 — upsert: is_new=false, 기존 레코드 반환
-  it('이미 등록된 종목을 다시 등록하면 is_new=false로 기존 레코드가 반환된다', async () => {
-    const ticker = `DUP${RUN_ID}`;
-
-    // 최초 등록
-    const { data: first, error: e1 } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: ticker,
-      p_asset_type: 'us_stock',
-      p_name: 'Duplicate Stock',
-      p_naver_industry: null,
-    });
-    expect(e1).toBeNull();
-    expect(first.is_new).toBe(true);
-    createdStockIds.push(first.id);
-
-    // 중복 등록
-    const { data: second, error: e2 } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: ticker,
-      p_asset_type: 'us_stock',
-      p_name: 'Duplicate Stock Again',
-      p_naver_industry: null,
-    });
-    expect(e2).toBeNull();
-    expect(second.is_new).toBe(false);
-    // 같은 id 반환
-    expect(second.id).toBe(first.id);
-  });
-
-  // 미인증 사용자 차단
-  it('미인증 사용자는 upsert_stock_with_sector RPC 호출 불가', async () => {
-    const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-    });
-
-    const { error } = await anonClient.rpc('upsert_stock_with_sector', {
-      p_ticker: `ANON${RUN_ID}`,
-      p_asset_type: 'us_stock',
-      p_name: 'Anon Stock',
-      p_naver_industry: null,
-    });
-
-    expect(error).not.toBeNull();
-  });
-
-  // 잘못된 asset_type
-  it('잘못된 asset_type 전달 시 에러 반환', async () => {
-    const { error } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: `INVALID${RUN_ID}`,
-      p_asset_type: 'wrong_type',
-      p_name: 'Invalid Type Stock',
-      p_naver_industry: null,
-    });
-
-    expect(error).not.toBeNull();
-  });
-});
-
-// ════════════════════════════════════════════
-// 3. updateStockSector (섹터 수동 변경)
-// ════════════════════════════════════════════
-
-describe('updateStockSector (섹터 수동 변경)', () => {
+describe('stocks 섹터 변경 (RLS)', () => {
+  // [012] 일반 사용자의 stocks 직접 쓰기 정책은 제거됨 —
+  //       앱의 섹터 수동 변경(updateStockSector)은 FastAPI(service key) 경유
   let stockId: string;
 
   beforeAll(async () => {
-    // 섹터 없이 종목 하나 등록
-    const { data, error } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: `UPD_SECTOR${RUN_ID}`,
-      p_asset_type: 'us_stock',
-      p_name: 'Sector Update Test',
-      p_naver_industry: null,
-    });
+    // 섹터 없이 종목 하나 등록 (service_role)
+    const { data, error } = await adminClient
+      .from('stocks')
+      .insert({
+        ticker: `UPD_SECTOR${RUN_ID}`,
+        market: 'US',
+        currency: 'USD',
+        name: 'Sector Update Test',
+        sector_id: null,
+      })
+      .select('id')
+      .single();
     expect(error).toBeNull();
-    stockId = data.id;
+    stockId = data!.id;
     createdStockIds.push(stockId);
   });
 
-  it('sector_id를 유효한 섹터로 변경하면 업데이트된 레코드가 반환된다', async () => {
-    const { data, error } = await userClient
+  it('일반 사용자의 stocks 직접 UPDATE는 RLS로 차단된다 ([012])', async () => {
+    const { data } = await userClient
+      .from('stocks')
+      .update({ sector_id: 3 })
+      .eq('id', stockId)
+      .select();
+
+    // 쓰기 정책이 없으므로 영향받은 행이 없어야 함
+    expect(data ?? []).toHaveLength(0);
+
+    const { data: after } = await adminClient
+      .from('stocks')
+      .select('sector_id')
+      .eq('id', stockId)
+      .single();
+    expect(after!.sector_id).toBeNull();
+  });
+
+  it('service_role은 sector_id를 변경/해제할 수 있다', async () => {
+    const { data, error } = await adminClient
       .from('stocks')
       .update({ sector_id: 3 })  // FINANCIALS
       .eq('id', stockId)
@@ -330,23 +211,19 @@ describe('updateStockSector (섹터 수동 변경)', () => {
       .single();
 
     expect(error).toBeNull();
-    expect(data).not.toBeNull();
     expect(data!.sector_id).toBe(3);
-    expect((data as any).sectors).not.toBeNull();
     expect((data as any).sectors.code).toBe('FINANCIALS');
-  });
 
-  it('sector_id를 null로 변경하면 미분류 처리된다', async () => {
-    const { data, error } = await userClient
+    const { data: cleared, error: clearErr } = await adminClient
       .from('stocks')
       .update({ sector_id: null })
       .eq('id', stockId)
       .select('*, sectors(id, code, name)')
       .single();
 
-    expect(error).toBeNull();
-    expect(data!.sector_id).toBeNull();
-    expect((data as any).sectors).toBeNull();
+    expect(clearErr).toBeNull();
+    expect(cleared!.sector_id).toBeNull();
+    expect((cleared as any).sectors).toBeNull();
   });
 });
 
@@ -359,30 +236,35 @@ describe('getStock (단건 조회)', () => {
   let stockId: string;
 
   beforeAll(async () => {
-    // 조회 대상 종목 생성 (IT 섹터)
-    const { data, error } = await userClient.rpc('upsert_stock_with_sector', {
-      p_ticker: ticker,
-      p_asset_type: 'us_stock',
-      p_name: 'GetStock Test',
-      p_naver_industry: 'IT',
-    });
+    // 조회 대상 종목 생성 (IT 섹터, id=1) — [012] 사용자 직접 INSERT 불가, service_role 사용
+    const { data, error } = await adminClient
+      .from('stocks')
+      .insert({
+        ticker,
+        market: 'US',
+        currency: 'USD',
+        name: 'GetStock Test',
+        sector_id: 1,
+      })
+      .select('id')
+      .single();
     expect(error).toBeNull();
-    stockId = data.id;
+    stockId = data!.id;
     createdStockIds.push(stockId);
   });
 
-  it('ticker + asset_type으로 종목을 조회하면 sectors join 포함 레코드가 반환된다', async () => {
+  it('ticker + market으로 종목을 조회하면 sectors join 포함 레코드가 반환된다', async () => {
     const { data, error } = await userClient
       .from('stocks')
       .select('*, sectors(id, code, name)')
       .eq('ticker', ticker)
-      .eq('asset_type', 'us_stock')
+      .eq('market', 'US')
       .maybeSingle();
 
     expect(error).toBeNull();
     expect(data).not.toBeNull();
     expect(data!.ticker).toBe(ticker);
-    expect(data!.asset_type).toBe('us_stock');
+    expect(data!.market).toBe('US');
     expect((data as any).sectors).not.toBeNull();
     expect((data as any).sectors.code).toBe('IT');
   });
@@ -392,7 +274,7 @@ describe('getStock (단건 조회)', () => {
       .from('stocks')
       .select('*, sectors(id, code, name)')
       .eq('ticker', 'NONEXISTENT_TICKER_XYZ')
-      .eq('asset_type', 'us_stock')
+      .eq('market', 'US')
       .maybeSingle();
 
     expect(error).toBeNull();
@@ -401,43 +283,7 @@ describe('getStock (단건 조회)', () => {
 });
 
 // ════════════════════════════════════════════
-// 5. kr_sector_map 시드 확인
-// ════════════════════════════════════════════
-
-describe('kr_sector_map 시드 확인', () => {
-  it('인증된 사용자는 kr_sector_map SELECT 가능', async () => {
-    const { data, error } = await userClient
-      .from('kr_sector_map')
-      .select('*');
-
-    expect(error).toBeNull();
-    expect(Array.isArray(data)).toBe(true);
-    // 39개 이상의 시드 행이 있어야 함
-    expect(data!.length).toBeGreaterThanOrEqual(39);
-  });
-
-  it('반도체 → IT(id=1) 매핑이 존재한다', async () => {
-    const { data, error } = await userClient
-      .from('kr_sector_map')
-      .select('*')
-      .eq('naver_industry', '반도체')
-      .single();
-
-    expect(error).toBeNull();
-    expect(data!.sector_id).toBe(1);
-  });
-
-  it('인증된 사용자는 kr_sector_map INSERT 불가', async () => {
-    const { error } = await userClient
-      .from('kr_sector_map')
-      .insert({ naver_industry: '테스트업종', sector_id: 1 });
-
-    expect(error).not.toBeNull();
-  });
-});
-
-// ════════════════════════════════════════════
-// 6. stocks RLS 검증
+// 4. stocks RLS 검증
 // ════════════════════════════════════════════
 
 describe('stocks RLS 검증', () => {
@@ -452,34 +298,34 @@ describe('stocks RLS 검증', () => {
     expect(isBlocked).toBe(true);
   });
 
-  it('인증된 사용자는 stocks에 직접 INSERT 가능', async () => {
+  it('인증된 사용자의 stocks 직접 INSERT는 RLS로 차단된다 ([012] 등록은 RPC 경유)', async () => {
     const ticker = `DIRECT_INSERT${RUN_ID}`;
 
-    const { data, error } = await userClient
+    const { error } = await userClient
       .from('stocks')
       .insert({
         ticker,
-        asset_type: 'us_stock',
+        market: 'US',
+        currency: 'USD',
         name: 'Direct Insert Test',
         sector_id: null,
       })
       .select()
       .single();
 
-    expect(error).toBeNull();
-    expect(data!.ticker).toBe(ticker);
-
-    createdStockIds.push(data!.id);
+    expect(error).not.toBeNull();
+    expect(error!.code).toBe('42501'); // RLS violation
   });
 
   it('service_role은 stocks DELETE 가능', async () => {
     // 삭제 대상 종목 생성
     const ticker = `DELETE_TEST${RUN_ID}`;
-    const { data: inserted, error: insertErr } = await userClient
+    const { data: inserted, error: insertErr } = await adminClient
       .from('stocks')
       .insert({
         ticker,
-        asset_type: 'us_stock',
+        market: 'US',
+        currency: 'USD',
         name: 'Delete Test',
         sector_id: null,
       })

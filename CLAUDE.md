@@ -61,9 +61,11 @@ invest-dashboard/
     ├── types/           # 공통 타입
     ├── utils/           # supabase 클라이언트 등 공용 유틸
     ├── supabase/
+    │   ├── config.toml  # 로컬 Supabase 스택 설정 (supabase start)
+    │   ├── seed.sql     # 로컬 시드 (종목 마스터 샘플 — db reset 시 자동 적용)
     │   └── migrations/  # DB 마이그레이션 SQL
     └── tests/
-        └── integration/ # Jest 백엔드 통합 테스트
+        └── integration/ # Jest 백엔드 통합 테스트 (로컬 Supabase 대상)
 ```
 
 ## 에이전트 워크플로우
@@ -244,6 +246,13 @@ echo "[$(date +%H:%M:%S)] {메시지}" >> logs/pipeline-status.log
 - 백엔드 구현은 Supabase 단일 사용 (SQL 쿼리, RLS 정책, Edge Function)
 - 별도 서버 추가 시 `server/` 디렉토리 생성
 - 이슈 번호는 `issues/` 폴더 스캔 후 auto-increment
+
+### 백엔드 테스트는 로컬 Supabase 대상 (운영 DB 격리)
+- Jest 통합 테스트는 **로컬 Supabase**(Docker, `supabase start`)를 대상으로 실행한다 — `app/.env.test`가 `http://127.0.0.1:54321`과 CLI 공개 데모 키를 가리킨다
+- 흐름: 마이그레이션 작성 → `supabase db reset`(로컬 전체 적용 + seed) → **전체 스위트** `npm run test:integration` → 합격 시에만 `supabase db push`(원격 반영, 파이프라인 유일의 원격 쓰기 지점)
+- `db reset`이 매번 마이그레이션 전체를 빈 DB에 적용하므로 타임스탬프 충돌·드리프트가 즉시 드러난다
+- 테스트 합격 판정은 이슈 테스트 파일 단독이 아니라 **반드시 전체 스위트**로 한다 (이슈 025의 `name_en` 회귀가 전체 미실행으로 운영까지 나간 전례)
+- 원격 스키마를 SQL Editor 등으로 직접 수정하지 않는다 — 모든 변경은 마이그레이션 파일로 (드리프트 발생 시 `supabase db diff --linked`로 동기화)
 
 ### 프론트엔드 렌더링 최적화 원칙
 
