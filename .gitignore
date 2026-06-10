@@ -44,7 +44,14 @@ yarn-error.log*
 
 # supabase cli runtime
 app/supabase/.temp/
+supabase/.temp/
+
+# python
+__pycache__/
+scripts/.venv/
 
 # claude pipeline
-.claude/pipeline.log
+.claude/*.log
+.claude/settings.local.json
 logs/
+scripts/*.log
