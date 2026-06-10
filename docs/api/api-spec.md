@@ -599,6 +599,9 @@ null  // 삭제 성공 시 데이터 없음
     asset_type: 'korean_stock' | 'us_stock' | 'crypto'
     quantity: number              // 보유 수량 (매수 − 매도, corporate_actions 반영)
     avg_buy_price: number         // 평균 매수가 (가중평균)
+                                  // 재생 순서: event_date → (같은 날짜는 buy 먼저) → created_at.
+                                  // 일괄 임포트는 created_at이 동일해 동점이 흔하며, 공매도 미지원
+                                  // 도메인에서는 buy-먼저 처리가 모든 케이스에서 정확한 수량을 보장
     currency: string
     total_fee: number             // 누적 수수료 (원 통화)
     total_tax: number             // 누적 세금 (원 통화)

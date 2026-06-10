@@ -56,3 +56,6 @@ scripts/.venv/
 .claude/settings.local.json
 logs/
 scripts/*.log
+
+# transaction statement (개인 거래내역 — 커밋 금지)
+transaction-statement/

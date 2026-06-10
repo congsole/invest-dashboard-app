@@ -924,6 +924,44 @@ describe('get_kpi_summary RPC', () => {
     expect(holding).toBeUndefined();
   });
 
+  it('같은 날 매수+전량 매도(일괄 INSERT, created_at 동일)도 holdings에서 제외', async () => {
+    const ticker = `SAMEDAY${RUN_ID}`;
+
+    // 단일 INSERT 문(배열)이라 두 행의 created_at이 동일하고,
+    // 배열에 sell을 먼저 둬 매도-선행 재생 시 유령 보유가 생기는 케이스를 재현
+    const base = {
+      event_date: '2026-01-10',
+      asset_type: 'us_stock' as const,
+      ticker,
+      name: 'Same Day Stock',
+      currency: 'USD',
+      fee: 0,
+      tax: 0,
+      source: 'manual' as const,
+      user_id: testUserId,
+    };
+    const { data: rows, error: e1 } = await userClient
+      .from('account_events')
+      .insert([
+        { ...base, event_type: 'sell', quantity: 2, price_per_unit: 120, amount: 240 },
+        { ...base, event_type: 'buy', quantity: 2, price_per_unit: 100, amount: 200 },
+      ])
+      .select();
+
+    expect(e1).toBeNull();
+    createdIds.push(...rows!.map((r: any) => r.id));
+
+    const { data, error } = await userClient.rpc('get_kpi_summary', {
+      p_asset_type: null,
+      p_current_prices: [],
+      p_fx_rate_usd: 1300,
+    });
+
+    expect(error).toBeNull();
+    const holding = (data.holdings as any[]).find((h: any) => h.ticker === ticker);
+    expect(holding).toBeUndefined();
+  });
+
   it('p_fx_rate_usd <= 0 이면 에러 반환', async () => {
     const { error } = await userClient.rpc('get_kpi_summary', {
       p_asset_type: null,
