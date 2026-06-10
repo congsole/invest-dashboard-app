@@ -45,6 +45,60 @@ const COIN_ID_MAP: Record<string, string> = {
   LINK: 'chainlink',
 };
 
+// Twelve Data 무료 플랜: 분당 8크레딧 (심볼 1개 = 1크레딧)
+// 8개씩 나눠 요청하고 청크 사이 60초 대기. 429는 60초 후 1회 재시도.
+const TWELVE_DATA_CHUNK_SIZE = 8;
+const RATE_LIMIT_WAIT_MS = 60_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchStockChunk(
+  chunk: HoldingTicker[],
+  apiKey: string,
+  fallbackDate: string,
+): Promise<{ prices: PriceRow[]; failed: FailedTicker[] }> {
+  const prices: PriceRow[] = [];
+  const failed: FailedTicker[] = [];
+
+  // date 파라미터 없이 호출하면 가장 최근 거래일 종가를 반환한다.
+  // 실행 시각에 따라 당일 장이 안 끝났을 수 있으므로 응답의 datetime(실제 거래일)으로 저장.
+  const symbols = chunk.map((t) => t.ticker).join(',');
+  const url = `https://api.twelvedata.com/eod?symbol=${encodeURIComponent(symbols)}&apikey=${apiKey}`;
+
+  try {
+    let res = await fetch(url);
+    if (res.status === 429) {
+      await sleep(RATE_LIMIT_WAIT_MS);
+      res = await fetch(url);
+    }
+    if (!res.ok) throw new Error(`Twelve Data HTTP 오류: ${res.status}`);
+    const data = await res.json();
+
+    for (const t of chunk) {
+      const entry = chunk.length === 1 ? data : data[t.ticker];
+      if (!entry || entry.status === 'error' || !entry.close) {
+        failed.push({ ticker: t.ticker, reason: entry?.message ?? '종가 데이터 없음' });
+        continue;
+      }
+      prices.push({
+        ticker:     t.ticker,
+        asset_type: t.asset_type,
+        date:       typeof entry.datetime === 'string' ? entry.datetime.slice(0, 10) : fallbackDate,
+        close:      parseFloat(entry.close),
+        currency:   t.asset_type === 'korean_stock' ? 'KRW' : 'USD',
+      });
+    }
+  } catch (err) {
+    for (const t of chunk) {
+      failed.push({ ticker: t.ticker, reason: `Twelve Data 오류: ${err instanceof Error ? err.message : err}` });
+    }
+  }
+
+  return { prices, failed };
+}
+
 async function fetchStockClose(
   tickers: HoldingTicker[],
   apiKey: string,
@@ -55,33 +109,61 @@ async function fetchStockClose(
 
   if (tickers.length === 0) return { prices, failed };
 
-  // Twelve Data: 단일 요청으로 여러 ticker 조회
-  const symbols = tickers.map((t) => t.ticker).join(',');
-  const url = `https://api.twelvedata.com/eod?symbol=${encodeURIComponent(symbols)}&date=${date}&apikey=${apiKey}`;
+  for (let i = 0; i < tickers.length; i += TWELVE_DATA_CHUNK_SIZE) {
+    if (i > 0) await sleep(RATE_LIMIT_WAIT_MS);
+    const chunk = tickers.slice(i, i + TWELVE_DATA_CHUNK_SIZE);
+    const result = await fetchStockChunk(chunk, apiKey, date);
+    prices.push(...result.prices);
+    failed.push(...result.failed);
+  }
 
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Twelve Data HTTP 오류: ${res.status}`);
-    const data = await res.json();
+  return { prices, failed };
+}
 
-    for (const t of tickers) {
-      const entry = tickers.length === 1 ? data : data[t.ticker];
-      if (!entry || entry.status === 'error' || !entry.close) {
-        failed.push({ ticker: t.ticker, reason: entry?.message ?? '종가 데이터 없음' });
+// 네이버 금융 일별 시세 — KRX는 Twelve Data 무료 플랜 미지원이라 네이버 사용
+// 응답이 표준 JSON이 아니므로 행 단위 정규식으로 파싱한다.
+async function fetchKoreanStockClose(
+  tickers: HoldingTicker[],
+  date: string,
+): Promise<{ prices: PriceRow[]; failed: FailedTicker[] }> {
+  const prices: PriceRow[] = [];
+  const failed: FailedTicker[] = [];
+
+  if (tickers.length === 0) return { prices, failed };
+
+  const endTime = date.replaceAll('-', '');
+  const start = new Date(date);
+  start.setDate(start.getDate() - 7);
+  const startTime = start.toISOString().slice(0, 10).replaceAll('-', '');
+
+  for (const t of tickers) {
+    try {
+      const url = `https://api.finance.naver.com/siseJson.naver?symbol=${encodeURIComponent(t.ticker)}&requestType=1&startTime=${startTime}&endTime=${endTime}&timeframe=day`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`네이버 금융 HTTP 오류: ${res.status}`);
+      const text = await res.text();
+
+      // ["20260610", 시가, 고가, 저가, 종가, 거래량, ...] 행 추출
+      const rows = [...text.matchAll(/\["(\d{8})",\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),/g)];
+      if (rows.length === 0) {
+        failed.push({ ticker: t.ticker, reason: '네이버 금융 시세 데이터 없음' });
         continue;
       }
+
+      // endTime 이하 가장 최근 거래일 사용 (휴장일 대비)
+      const last = rows[rows.length - 1];
+      const rowDate = `${last[1].slice(0, 4)}-${last[1].slice(4, 6)}-${last[1].slice(6, 8)}`;
       prices.push({
         ticker:     t.ticker,
         asset_type: t.asset_type,
-        date,
-        close:      parseFloat(entry.close),
-        currency:   t.asset_type === 'korean_stock' ? 'KRW' : 'USD',
+        date:       rowDate,
+        close:      parseFloat(last[5]),
+        currency:   'KRW',
       });
+    } catch (err) {
+      failed.push({ ticker: t.ticker, reason: `네이버 금융 오류: ${err instanceof Error ? err.message : err}` });
     }
-  } catch (err) {
-    for (const t of tickers) {
-      failed.push({ ticker: t.ticker, reason: `Twelve Data 오류: ${err instanceof Error ? err.message : err}` });
-    }
+    await sleep(500); // 비공식 API — 0.5초 간격으로 조회
   }
 
   return { prices, failed };
@@ -132,7 +214,13 @@ async function fetchCryptoClose(
   return { prices, failed };
 }
 
-Deno.serve(async (_req: Request) => {
+interface CollectResult {
+  collected: number;
+  skipped: number;
+  failed: FailedTicker[];
+}
+
+async function collectPrices(): Promise<CollectResult> {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey);
 
@@ -147,11 +235,7 @@ Deno.serve(async (_req: Request) => {
     .not('asset_type', 'is', null);
 
   if (eventsError) {
-    console.error('account_events 조회 오류:', eventsError);
-    return new Response(
-      JSON.stringify({ error: { code: '500', message: eventsError.message } }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } },
-    );
+    throw new Error(`account_events 조회 오류: ${eventsError.message}`);
   }
 
   // ticker별 순수량 계산
@@ -181,10 +265,7 @@ Deno.serve(async (_req: Request) => {
   }
 
   if (holdingTickers.length === 0) {
-    return new Response(
-      JSON.stringify({ collected: 0, skipped: 0, failed: [] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    );
+    return { collected: 0, skipped: 0, failed: [] };
   }
 
   // 2. 이미 오늘 수집된 ticker 제외 (skipped)
@@ -202,22 +283,24 @@ Deno.serve(async (_req: Request) => {
   const skipped = holdingTickers.length - toFetch.length;
 
   if (toFetch.length === 0) {
-    return new Response(
-      JSON.stringify({ collected: 0, skipped, failed: [] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    );
+    return { collected: 0, skipped, failed: [] };
   }
 
-  const stockTickers = toFetch.filter((t) => t.asset_type !== 'crypto');
+  const usStockTickers = toFetch.filter((t) => t.asset_type === 'us_stock');
+  const krStockTickers = toFetch.filter((t) => t.asset_type === 'korean_stock');
   const cryptoTickers = toFetch.filter((t) => t.asset_type === 'crypto');
 
   const twelveDataApiKey = Deno.env.get('TWELVE_DATA_API_KEY') ?? '';
   const coinGeckoApiKey = Deno.env.get('COINGECKO_API_KEY') ?? '';
 
-  const [stockResult, cryptoResult] = await Promise.all([
-    fetchStockClose(stockTickers, twelveDataApiKey, today).catch((err) => ({
+  const [usResult, krResult, cryptoResult] = await Promise.all([
+    fetchStockClose(usStockTickers, twelveDataApiKey, today).catch((err) => ({
       prices: [] as PriceRow[],
-      failed: stockTickers.map((t) => ({ ticker: t.ticker, reason: String(err) })),
+      failed: usStockTickers.map((t) => ({ ticker: t.ticker, reason: String(err) })),
+    })),
+    fetchKoreanStockClose(krStockTickers, today).catch((err) => ({
+      prices: [] as PriceRow[],
+      failed: krStockTickers.map((t) => ({ ticker: t.ticker, reason: String(err) })),
     })),
     fetchCryptoClose(cryptoTickers, coinGeckoApiKey).catch((err) => ({
       prices: [] as PriceRow[],
@@ -225,8 +308,8 @@ Deno.serve(async (_req: Request) => {
     })),
   ]);
 
-  const allPrices: PriceRow[] = [...stockResult.prices, ...cryptoResult.prices];
-  const allFailed: FailedTicker[] = [...stockResult.failed, ...cryptoResult.failed];
+  const allPrices: PriceRow[] = [...usResult.prices, ...krResult.prices, ...cryptoResult.prices];
+  const allFailed: FailedTicker[] = [...usResult.failed, ...krResult.failed, ...cryptoResult.failed];
 
   // 3. prices 테이블에 upsert
   let collected = 0;
@@ -245,17 +328,52 @@ Deno.serve(async (_req: Request) => {
       .upsert(upsertRows, { onConflict: 'ticker,asset_type,date' });
 
     if (upsertError) {
-      console.error('prices upsert 오류:', upsertError);
-      return new Response(
-        JSON.stringify({ error: { code: '500', message: upsertError.message } }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } },
-      );
+      throw new Error(`prices upsert 오류: ${upsertError.message}`);
     }
     collected = allPrices.length;
   }
 
-  return new Response(
-    JSON.stringify({ collected, skipped, failed: allFailed }),
-    { status: 200, headers: { 'Content-Type': 'application/json' } },
-  );
+  return { collected, skipped, failed: allFailed };
+}
+
+// Twelve Data 분당 한도 대기 때문에 전체 수집이 1분을 넘을 수 있다.
+// cron(pg_net)의 HTTP timeout은 수 초라, 기본 동작은 즉시 202를 반환하고
+// 수집은 EdgeRuntime.waitUntil 백그라운드로 계속한다 (결과는 함수 로그로 확인).
+// 수동 검증 시에는 ?sync=1로 호출하면 완료까지 기다렸다가 결과를 반환한다.
+Deno.serve(async (req: Request) => {
+  const sync = new URL(req.url).searchParams.get('sync') === '1';
+
+  if (sync) {
+    try {
+      const result = await collectPrices();
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('cron-collect-prices 실패:', message);
+      return new Response(
+        JSON.stringify({ error: { code: '500', message } }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+  }
+
+  const task = collectPrices()
+    .then((r) => console.log('cron-collect-prices 완료:', JSON.stringify(r)))
+    .catch((err) => console.error('cron-collect-prices 실패:', err instanceof Error ? err.message : err));
+
+  // @ts-ignore: EdgeRuntime은 Supabase Edge Runtime 전역
+  if (typeof EdgeRuntime !== 'undefined') {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(task);
+  } else {
+    await task; // waitUntil 미지원 환경 (로컬 단독 실행 등)
+  }
+
+  return new Response(JSON.stringify({ status: 'accepted' }), {
+    status: 202,
+    headers: { 'Content-Type': 'application/json' },
+  });
 });

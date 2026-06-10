@@ -159,16 +159,25 @@ Deno.serve(async (_req: Request) => {
     );
   }
 
-  // 3. 오늘 prices 테이블에서 종가 맵 로드
+  // 3. prices 테이블에서 종가 맵 로드
+  // 당일 정확 일치가 아니라 최근 7일 내 가장 최신 종가를 쓴다.
+  // (시차상 미국 종가는 KST 00:05 스냅샷 시점에 전일자가 최신이고, 휴장일도 있음)
+  const lookbackStart = new Date();
+  lookbackStart.setDate(lookbackStart.getDate() - 7);
+  const lookbackStartStr = lookbackStart.toISOString().split('T')[0];
+
   const { data: priceRows } = await supabase
     .from('prices')
-    .select('ticker, asset_type, close, currency')
-    .eq('date', today);
+    .select('ticker, asset_type, close, currency, date')
+    .gte('date', lookbackStartStr)
+    .lte('date', today)
+    .order('date', { ascending: false });
 
   const priceMap = new Map<string, number>();
   const priceCurrencyMap = new Map<string, string>();
   for (const p of priceRows ?? []) {
     const key = `${p.asset_type}:${p.ticker}`;
+    if (priceMap.has(key)) continue; // date desc 정렬 — 첫 행이 최신
     priceMap.set(key, p.close);
     priceCurrencyMap.set(key, p.currency);
   }
