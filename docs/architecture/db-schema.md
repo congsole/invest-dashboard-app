@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: 5872267 — 2026-06-09*
+*최종 업데이트: 8a65984 — 2026-06-10*
 
 ## 테이블
 
@@ -66,7 +66,7 @@
 ---
 
 ### daily_snapshots
-매일 KST 자정 직후 cron으로 기록하는 자산 스냅샷. 히스토리 그래프 성능 최적화 및 추후 TWR 소급 계산용.
+매일 KST 자정 직후 cron으로 기록하는 자산 스냅샷. 히스토리 그래프 성능 최적화 및 추후 TWR 소급 계산용. 수동 새로고침 시에도 오늘 날짜로 동일한 `(user_id, snapshot_date)` upsert가 발생하며, 자정 cron이 종가 기준으로 덮어써 확정값이 된다. 수동 새로고침이 생성한 당일 값은 잠정치이며 자정 cron이 최종 확정한다.
 
 | 컬럼 | 타입 | 기본값 | 제약 | 설명 |
 |------|------|--------|------|------|
@@ -89,9 +89,32 @@
 
 **RLS 방향**
 - SELECT: 본인(`auth.uid() = user_id`)만 조회 가능
-- INSERT: 본인 user_id로만 삽입 가능 (`auth.uid() = user_id`). cron Edge Function은 service_role로 모든 사용자에 INSERT.
-- UPDATE: 본인 레코드만 수정 가능 (`auth.uid() = user_id`)
+- INSERT: 본인 user_id로만 삽입 가능 (`auth.uid() = user_id`). cron Edge Function 및 수동 새로고침 Edge Function은 service_role로 모든 사용자에 upsert.
+- UPDATE: service_role만 허용 (수동 새로고침·cron upsert 경유)
 - DELETE: 허용하지 않음
+
+---
+
+### snapshot_refresh_quotas
+당일 스냅샷 수동 새로고침의 일 3회 제한을 서버에서 기록·강제하기 위한 사용량 추적 테이블. KST 날짜 기준으로 날짜가 바뀌면 새 행이 삽입되어 자정 리셋을 구현한다. 갱신 실패 시 횟수를 차감하지 않으므로 실제 성공 횟수만 기록된다.
+
+| 컬럼 | 타입 | 기본값 | 제약 | 설명 |
+|------|------|--------|------|------|
+| user_id | uuid | — | PK (복합), FK → auth.users(id) ON DELETE CASCADE, not null | 사용자 ID |
+| quota_date | date | — | PK (복합), not null | KST 날짜 (기준 날짜) |
+| used_count | int | 0 | not null, CHECK (used_count >= 0 AND used_count <= 3) | 해당 날짜에 소진한 횟수 (최대 3) |
+| last_refreshed_at | timestamptz | — | nullable | 마지막 수동 새로고침 시각 |
+
+**기본 키**
+- `(user_id, quota_date)` 복합 PK
+
+**인덱스**
+- `idx_snapshot_refresh_quotas_user_id_quota_date` ON (user_id, quota_date DESC) — 특정 사용자의 당일 쿼터 단건 조회 (복합 PK와 별도로 정렬 최적화)
+
+**RLS 방향**
+- SELECT: 본인(`auth.uid() = user_id`)만 조회 가능 (남은 횟수 표시용)
+- INSERT / UPDATE: service_role만 허용 (수동 새로고침 Edge Function이 원자적으로 카운트 증가 및 upsert 처리)
+- DELETE: 허용하지 않음 (날짜별 새 행 삽입 방식으로 자동 리셋, 명시적 삭제 불필요)
 
 ---
 
@@ -470,6 +493,7 @@ auth.users ||--|| profiles : "1:1 (user_id FK)"
 auth.users ||--o{ auth.identities : "1:N (user_id FK) — Supabase 관리"
 auth.users ||--o{ account_events : "1:N (user_id FK)"
 auth.users ||--o{ daily_snapshots : "1:N (user_id FK)"
+auth.users ||--o{ snapshot_refresh_quotas : "1:N (user_id FK, PK 복합)"
 auth.users ||--o{ memos : "1:N (user_id FK)"
 account_events }o--o| prices : "N:1 (ticker + asset_type + event_date → prices)"
 corporate_actions }o--o| prices : "N:1 (ticker + asset_type + effective_date → prices)"
@@ -508,3 +532,4 @@ user_category_stocks }o--|| stocks : "N:1 (stock_id FK, cascade)"
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | DB 스키마(테이블/컬럼) 변경 없음. stocks 테이블: `name` 컬럼 설명에 메모 리스트형 종목 칩 라벨 표시 규칙(market 무관, 항상 name 표시) 추가. memo_sectors 테이블: 직접 연결 경로 설명을 "자신 및 하위 레벨" 포함으로 명확화(L1 선택 시 L1 자신도 포함), L1/L2 예시 문장 추가, `sectorIds` 동작 상세화(L2 미로딩 시 L1 id만으로 즉시 적용 가능, 이후 L2 보충 추가, L1+L2 id 모두 저장) 반영. |
 | [008] 섹터 검색 (7b29cbe) | DB 스키마(테이블/컬럼/인덱스/RLS) 변경 없음. 섹터 검색은 순수 프론트엔드 기능으로, 기존 sectors 테이블의 name/name_en/parent_id/level 컬럼으로 클라이언트 사이드 breadcrumb 구축 및 필터링을 모두 처리한다. |
 | [009] 사용자 카테고리 (5872267) | user_categories 테이블 신규 추가 (user_id FK, name, unique(user_id, name), 인덱스 idx_user_categories_user_id). user_category_stocks junction 테이블 신규 추가 (category_id+stock_id 복합 PK, 각각 cascade FK, created_at, 인덱스 idx_user_category_stocks_stock_id). memo_categories junction 테이블 신규 추가 (memo_id+category_id 복합 PK, 각각 cascade FK, 인덱스 idx_memo_categories_category_id, 카테고리 필터 쿼리 패턴 기록). ERD 관계 5건 추가: auth.users→user_categories, user_categories→user_category_stocks, user_category_stocks→stocks, memos→memo_categories, memo_categories→user_categories. |
+| [010] 당일 스냅샷 수동 새로고침 (8a65984) | snapshot_refresh_quotas 테이블 신규 추가 (user_id+quota_date 복합 PK, used_count int default 0 CHECK ≤3, last_refreshed_at timestamptz nullable, RLS: SELECT 본인 조회 / INSERT·UPDATE service_role 전용). daily_snapshots 테이블 설명 수정: 수동 새로고침 upsert 패턴·잠정치 개념 추가, RLS UPDATE를 service_role 전용으로 변경. ERD 관계 1건 추가: auth.users→snapshot_refresh_quotas. |

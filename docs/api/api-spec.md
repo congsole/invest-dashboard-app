@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 5872267 — 2026-06-09*
+*최종 업데이트: 8a65984 — 2026-06-10*
 
 ## 공통
 
@@ -696,6 +696,91 @@ Array<{
   fx_rate_usd: number
 }>
 ```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+
+---
+
+### 당일 스냅샷 수동 새로고침 (Edge Function)
+
+그래프 카드에서 새로고침 버튼을 탭하면 호출한다. 클라이언트가 조회한 현재가 목록과 환율을 서버에 전달하면, 서버가 `account_events`를 집계하여 호출 사용자의 오늘자 `daily_snapshots` 1행을 재계산·upsert한다. 일 3회 제한을 서버에서 강제하며, 갱신 실패 시 횟수를 차감하지 않는다. 생성된 당일 값은 잠정치이며 자정 cron이 종가 기준으로 최종 확정한다.
+
+- **방식**: RPC (Edge Function)
+- **호출**: `supabase.functions.invoke('refresh-today-snapshot', { body: { current_prices, fx_rate_usd } })`
+- **인증**: 필요 — `supabase.functions.invoke`가 JWT를 Authorization 헤더에 자동 포함. Edge Function 내부에서 JWT로 사용자를 식별한다.
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| current_prices | `Array<{ ticker: string; asset_type: 'korean_stock' \| 'us_stock' \| 'crypto'; price: number; currency: string }>` | Y | 클라이언트가 조회한 현재가 목록. `get-market-prices` Edge Function 응답을 그대로 전달한다. |
+| fx_rate_usd | number | Y | 현재 USD/KRW 환율. `get-exchange-rate` Edge Function 응답을 그대로 전달한다. |
+
+**동작**
+1. JWT에서 `user_id` 추출
+2. `snapshot_refresh_quotas`에서 오늘자 `used_count` 조회. 3 이상이면 즉시 429 반환 (횟수 미차감)
+3. `account_events`를 집계하여 총 평가액·원금·예수금·순수익 계산 (`get_kpi_summary`와 동일 패턴)
+4. `daily_snapshots` upsert (ON CONFLICT (user_id, snapshot_date) DO UPDATE)
+5. `snapshot_refresh_quotas` upsert: used_count + 1, last_refreshed_at = now() — 4단계 성공 후에만 실행
+6. 갱신된 스냅샷 행과 남은 쿼터를 반환
+
+**응답**
+```typescript
+{
+  snapshot: {
+    snapshot_date: string           // YYYY-MM-DD (오늘 KST 날짜)
+    total_value_krw: number
+    principal_krw: number
+    cash_krw: number
+    cash_usd: number
+    net_profit_krw: number
+    fx_rate_usd: number
+  }
+  quota: {
+    used_count: number              // 갱신 후 소진 횟수 (1~3)
+    remaining: number               // 남은 횟수 (= 3 − used_count)
+    last_refreshed_at: string       // 방금 갱신한 시각 (ISO 8601)
+  }
+}
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 400 | current_prices 배열이 비어 있거나 형식 오류. fx_rate_usd <= 0. |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 422 | 집계에 필요한 account_events가 없음 (이벤트 미등록 상태) |
+| 429 | 일 3회 제한 초과. 횟수 미차감. |
+| 502 | 내부 계산 실패 (prices/fx_rates 조회 불가 등). 횟수 미차감. |
+
+---
+
+### 스냅샷 새로고침 쿼터 조회
+
+오늘자 수동 새로고침 남은 횟수를 조회한다. 그래프 카드 헤더의 `↻ N/3` 표시 초기화 및 앱 포그라운드 복귀 시 사용한다. `snapshot_refresh_quotas`에 오늘자 행이 없으면 used_count=0(오늘 한 번도 사용하지 않음)으로 간주한다.
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('snapshot_refresh_quotas').select('used_count, last_refreshed_at').eq('user_id', userId).eq('quota_date', todayKst).maybeSingle()`
+- **인증**: 필요
+
+**요청 파라미터**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| quota_date | string (date) | Y | KST 오늘 날짜 (YYYY-MM-DD). 클라이언트에서 KST 기준으로 계산하여 전달. |
+
+**응답**
+```typescript
+{
+  used_count: number              // 오늘 소진한 횟수 (0~3). 행 없으면 0으로 처리.
+  remaining: number               // 남은 횟수 (= 3 − used_count). 클라이언트 계산.
+  last_refreshed_at: string | null  // 마지막 갱신 시각. 오늘 미사용 시 null.
+} | null
+// null이면 오늘 사용 기록 없음 → used_count=0, remaining=3으로 처리
+```
+
+> 클라이언트는 응답이 null이거나 used_count=0이면 남은 횟수 3으로 표시한다.
 
 **에러 케이스**
 | 코드 | 상황 |
@@ -1945,3 +2030,4 @@ null  // 삭제 성공 시 데이터 없음
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | API 시그니처 변경 없음. Memo — 메모 목록 조회(list_memos) 섹터 필터 계층 탐색 규칙 수정: 직접 연결 경로를 "지정된 섹터 자신 및 하위 레벨"로 명확화 (기존: "하위 레벨만"), L1 자신에 직접 연결된 메모 포함 예시 추가. 핵심 보장 추가: L1 id만 전달해도 RPC 재귀 CTE가 하위 전체를 포함하므로 L2 로딩 여부와 무관하게 동일한 필터 결과 보장. `p_sector_ids` 파라미터 설명에 "자신 및 하위 레벨" 직접 연결 경로 보장 및 L1 id 단독 전달 시 동작 명시. |
 | [008] 섹터 검색 (7b29cbe) | API 시그니처 변경 없음. 섹터 검색은 순수 클라이언트 사이드 기능으로, 기존 섹터 목록 조회(Sector — 섹터 목록 조회)를 파라미터 없이 호출하여 전체 ~273개를 1회 로드한 뒤 클라이언트에서 name/name_en 기준으로 필터링하고 parent_id 체인으로 breadcrumb을 구축한다. 서버 API 추가·변경 없음. |
 | [009] 사용자 카테고리 (5872267) | UserCategory 도메인 신규 추가 (카테고리 목록 조회, 카테고리 생성, 카테고리 수정, 카테고리 삭제, 카테고리 종목 목록 조회, 카테고리에 종목 추가, 카테고리에서 종목 제거). Memo — 메모 생성 RPC(`create_memo_with_links`) `p_category_ids` 파라미터 추가, 응답에 `categories` 배열 추가. 메모 수정 RPC(`update_memo_with_links`) `p_category_ids` 파라미터 추가(null=변경 없음, 빈 배열=전체 해제), 응답에 `categories` 배열 추가. 메모 목록 조회 RPC(`list_memos`) `p_category_ids` 파라미터 추가(종목 경로+직접 연결 경로 OR 합산, 다른 필터와 AND 결합), 응답 memos 배열 내 `categories` 배열 추가, 필터 결합 규칙에 카테고리 행 추가, `p_no_links` 설명에 카테고리 연결 메모 제외 기준 명시. 메모 상세 조회 REST select에 `memo_categories(category_id, user_categories(id, name))` join 추가, 응답에 `memo_categories` 배열 추가. 메모 엔티티 연결 추가에 카테고리 연결 추가(`memo_categories.insert`) 추가. 메모 엔티티 연결 해제에 카테고리 연결 해제(`memo_categories.delete`) 추가. |
+| [010] 당일 스냅샷 수동 새로고침 (8a65984) | DailySnapshot — 당일 스냅샷 수동 새로고침 Edge Function(`refresh-today-snapshot`) 신규 추가: current_prices + fx_rate_usd 전달 → account_events 집계 → daily_snapshots upsert → snapshot_refresh_quotas used_count 증가, 갱신 성공 후에만 횟수 차감, 일 3회 초과 시 429 반환(횟수 미차감), 502 실패 시 횟수 미차감. 스냅샷 새로고침 쿼터 조회 REST API 신규 추가(`snapshot_refresh_quotas` SELECT, quota_date=KST 오늘, 행 없으면 used_count=0 처리). |

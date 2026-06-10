@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 5872267 — 2026-06-09*
+*최종 업데이트: 8a65984 — 2026-06-10*
 
 ## 엔터티
 
@@ -65,7 +65,7 @@ Supabase Auth가 관리하는 인증 제공자 연동 정보. `auth.identities` 
 | created_at | timestamptz | 생성 시각 | not null |
 
 ### DailySnapshot
-매일 KST 자정 직후 cron으로 기록하는 자산 스냅샷. 그래프 성능 최적화 및 추후 TWR 소급 계산용. DB 테이블명: `daily_snapshots`.
+매일 KST 자정 직후 cron으로 기록하는 자산 스냅샷. 그래프 성능 최적화 및 추후 TWR 소급 계산용. 수동 새로고침 시에도 오늘 날짜로 동일한 `(user_id, snapshot_date)` upsert가 발생하며, 자정 cron이 종가 기준으로 덮어써 확정값이 된다. DB 테이블명: `daily_snapshots`.
 
 | 속성 | 타입 | 설명 | 제약 |
 |------|------|------|------|
@@ -80,7 +80,19 @@ Supabase Auth가 관리하는 인증 제공자 연동 정보. `auth.identities` 
 | fx_rate_usd | numeric | 그날 종가 환율 | not null |
 | created_at | timestamptz | 생성 시각 | not null |
 
-> `(user_id, snapshot_date)` unique 제약.
+> `(user_id, snapshot_date)` unique 제약. 수동 새로고침이 생성한 당일 값은 잠정치이며 자정 cron이 종가 기준으로 최종 확정한다.
+
+### SnapshotRefreshQuota
+당일 스냅샷 수동 새로고침의 일 3회 제한을 서버에서 기록·강제하기 위한 사용량 추적 테이블. KST 날짜 기준으로 자정에 리셋된다. 갱신 실패 시 횟수를 차감하지 않으므로 실제 성공 횟수만 기록한다. DB 테이블명: `snapshot_refresh_quotas`.
+
+| 속성 | 타입 | 설명 | 제약 |
+|------|------|------|------|
+| user_id | uuid | 사용자 ID | PK (복합), FK → auth.users(id), not null |
+| quota_date | date | KST 날짜 (기준 날짜) | PK (복합), not null |
+| used_count | int | 해당 날짜에 소진한 횟수 | not null, default 0 |
+| last_refreshed_at | timestamptz | 마지막 수동 새로고침 시각 | nullable |
+
+> `(user_id, quota_date)` 복합 PK. 일 제한: used_count ≤ 3. 날짜가 바뀌면 새 행이 삽입되므로 별도 리셋 작업 불필요.
 
 ### CorporateAction
 주식 분할·무상증자·합병 등 기업 액션 기록. 과거 거래 기록은 절대 수정하지 않고 이 테이블의 이벤트로 effective_date 이후 보유수량을 조정한다. 종목 단위로 모든 사용자가 공유하며 RLS는 SELECT only. DB 테이블명: `corporate_actions`.
@@ -274,6 +286,7 @@ yfinance `industry` 문자열 → GICS Sub-Industry(L4) code 매핑 테이블. y
 | User 1:N Identity | 한 사용자는 여러 인증 제공자(email / google / apple)와 연동될 수 있다. 동일 이메일 시 Supabase 자동 링킹. |
 | User 1:N AccountEvent | 한 사용자는 여러 계정 이벤트(매수/매도/입금/출금/배당)를 가진다. |
 | User 1:N DailySnapshot | 한 사용자는 날짜별 자산 스냅샷을 가진다. (user_id, snapshot_date) unique. |
+| User 1:N SnapshotRefreshQuota | 한 사용자는 날짜별 수동 새로고침 사용 횟수를 가진다. (user_id, quota_date) PK. |
 | AccountEvent N:1 Price | 매수/매도 이벤트의 ticker+asset_type+date로 Price 조회. |
 | CorporateAction N:1 Price | 종목 분할 등 기업 액션은 해당 ticker의 가격 데이터와 연계. |
 | Stock N:1 Sector | 종목은 하나의 섹터에 속한다 (nullable). 가능한 한 Level 4(Sub-Industry)를 가리킴. 종목 등록 시 yfinance sector+industry로 자동 추천, 수동 보정 가능. |
@@ -373,3 +386,4 @@ c ∈ {KRW, USD, ...}.
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | Stock.name 속성 설명 확장: 메모 리스트형 종목 칩 라벨은 market에 관계없이 항상 name(종목명) 표시 규칙 명시. MemoSector 계층 탐색 규칙 명확화: 직접 연결 경로가 "자신 및 하위 레벨" 임을 명시 (L1 선택 시 L1 자신도 포함). 필터 UI sectorIds 동작 상세화: L2 미로딩 시 L1 id만으로 즉시 필터 적용 가능(RPC 재귀 CTE 보장), 이후 L2 로딩 시 보충 추가, sectorIds에 L1+L2 id 모두 저장 명시. |
 | [008] 섹터 검색 (7b29cbe) | 엔터티·속성·관계 변경 없음. 순수 프론트엔드/서비스 레이어 변경: CascadingSectorMultiPicker에 검색 입력 필드 추가, 전체 섹터 클라이언트 캐시 및 클라이언트 사이드 필터링. 기존 Sector 엔터티의 name/name_en/parent_id/level 속성으로 breadcrumb 구축 및 검색을 모두 처리하므로 DB 스키마 변경 불필요. |
 | [009] 사용자 카테고리 (5872267) | UserCategory 엔터티 신규 추가 (user_id, name, unique(user_id, name)). UserCategoryStock junction 엔터티 신규 추가 (category_id PK+FK, stock_id PK+FK). MemoCategory junction 엔터티 신규 추가 (memo_id PK+FK, category_id PK+FK). 관계 3건 추가: User 1:N UserCategory, UserCategory N:M Stock, Memo N:M UserCategory. 카테고리 필터링 규칙 추가: 종목 경로 + 직접 연결 경로 OR 합산 (섹터 필터와 동일 패턴). |
+| [010] 당일 스냅샷 수동 새로고침 (8a65984) | SnapshotRefreshQuota 엔터티 신규 추가 (user_id+quota_date 복합 PK, used_count, last_refreshed_at). 일 3회 서버 강제 제한용. DailySnapshot 엔터티 설명에 수동 새로고침 upsert 패턴 및 잠정치 개념 추가. 관계 1건 추가: User 1:N SnapshotRefreshQuota. |
