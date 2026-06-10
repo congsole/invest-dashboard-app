@@ -30,8 +30,11 @@ invest-dashboard/
 │   ├── architecture/
 │   │   ├── domain-model.md   # 공통 도메인 모델 (이슈마다 누적 업데이트)
 │   │   └── db-schema.md      # 공통 DB 스키마 (이슈마다 누적 업데이트)
-│   └── api/
-│       └── api-spec.md       # 공통 API 명세 (이슈마다 누적 업데이트)
+│   ├── api/
+│   │   └── api-spec.md       # 공통 API 명세 (이슈마다 누적 업데이트)
+│   ├── testing/
+│   │   └── manual-test-scenarios.md  # 전체 기능 수동 테스트 회귀 시나리오
+│   └── DEPLOYMENT.md
 ├── ui/                  # UI 레퍼런스 파일
 │   └── {기능명}/
 │       └── code.html
@@ -43,20 +46,24 @@ invest-dashboard/
 │       ├── 06-backend-test.md    # BE 트랙: Jest 통합 테스트 결과
 │       ├── 07-fe-impl.md         # FE 트랙: 프론트엔드 구현 내역
 │       ├── 08-fe-review.md       # FE 트랙: 프론트엔드 코드 리뷰
-│       └── 09-e2e-test.md        # Maestro E2E 테스트 결과
+│       └── 09-manual-test.md     # 수동 테스트 시나리오 (개발자가 직접 수행)
+├── scripts/             # Python 배치 (종목 마스터 시드/동기화: seed_stocks.py, sync_stocks.py)
+├── .github/workflows/   # keep-supabase-alive (무료 티어 일시정지 방지 ping)
+├── .claude/
+│   ├── agents/          # 파이프라인 서브에이전트 정의
+│   ├── hooks/           # git 훅 (core.hooksPath로 연결)
+│   └── *.sh, *.md       # 파이프라인 스크립트/프롬프트 (자동화 섹션 참조)
 └── app/                 # React Native (Expo) 앱 — 실제 코드
-    ├── services/        # Supabase API 호출 (도메인별, 예: auth.ts, portfolio.ts)
+    ├── services/        # Supabase API 호출 (도메인별, 예: auth.ts, memo.ts)
     ├── hooks/           # 커스텀 훅
     ├── screens/         # 화면 컴포넌트
     ├── components/      # 공통 컴포넌트
     ├── types/           # 공통 타입
+    ├── utils/           # supabase 클라이언트 등 공용 유틸
     ├── supabase/
     │   └── migrations/  # DB 마이그레이션 SQL
     └── tests/
         └── integration/ # Jest 백엔드 통합 테스트
-tests/
-└── e2e/                 # Maestro E2E 플로우 파일
-    └── {issue-slug}/
 ```
 
 ## 에이전트 워크플로우
@@ -106,11 +113,15 @@ tests/
   │  → backend-test-agent        │  │ ...                 │
   │  ...                         │  │                     │
   └──────────────────────────────┘  └─────────────────────┘
-        │ 모든 트랙 합격 후 파이프라인 종료
+        │ 모든 트랙 합격 후
         │
-        ▼ [4] E2E 테스트 (수동 — 자동 파이프라인에 미포함)
-  e2e-test-agent
-  (Maestro → iOS 시뮬레이터, 사용자가 직접 트리거)
+        ▼ [4] 수동 테스트 시나리오 작성 (오케스트레이터 직접) → 파이프라인 종료
+  issues/{NNN}/09-manual-test.md 생성
+  + docs/testing/manual-test-scenarios.md 갱신
+        │
+        ▼ [5] 수동 테스트 (개발자 직접 수행 — 자동화 없음)
+  09-manual-test.md 시나리오를 따라 iOS 시뮬레이터에서 검증
+  완료 시 issue.md의 "수동 테스트" 체크박스를 직접 체크
 ```
 
 #### 커밋 해시 고정 규칙
@@ -122,6 +133,13 @@ tests/
 #### Resume 지원
 issue.md의 구현 현황 체크박스(`[x]` / `[ ]`)를 보고 완료된 단계는 건너뛴다.
 중단된 파이프라인은 `.claude/resume-pipeline.sh`로 재개할 수 있다.
+
+#### 수동 테스트
+E2E 자동화(Maestro)는 폐기했다. 대신:
+- FE 트랙 합격 후 오케스트레이터가 `issues/{NNN}/09-manual-test.md`에 테스트 시나리오를 작성한다
+- 시나리오는 각각 **사전 조건 / 단계 / 기대 결과**로 구성하고, 해당 이슈의 변경 범위 + 인접 기능 회귀를 포함한다
+- 전체 기능 회귀 시나리오는 `docs/testing/manual-test-scenarios.md`에 누적 관리한다 (FE 변경 이슈마다 갱신)
+- 개발자가 시뮬레이터에서 직접 수행하고, 완료 시 issue.md의 `- [ ] 수동 테스트`를 체크한다
 
 ### 자동화 (검증 완료 — 적용됨)
 
@@ -219,7 +237,7 @@ echo "[$(date +%H:%M:%S)] {메시지}" >> logs/pipeline-status.log
 - [ ] Supabase 구현
 - [ ] 백엔드 테스트
 - [ ] 프론트엔드 구현
-- [ ] E2E 테스트
+- [ ] 수동 테스트
 ```
 
 ## 개발 규칙

@@ -37,4 +37,3 @@ git diff HEAD docs/api/api-spec.md
 - [ ] Supabase 구현
 - [ ] 백엔드 테스트
 - [ ] 프론트엔드 구현
-- [ ] E2E 테스트

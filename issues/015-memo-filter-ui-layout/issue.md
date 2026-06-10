@@ -34,4 +34,3 @@ git diff HEAD docs/api/api-spec.md
 - [N/A] Supabase 구현 (DB 스키마 변경 없음)
 - [N/A] 백엔드 테스트 (BE 변경 없음)
 - [x] 프론트엔드 구현
-- [ ] E2E 테스트

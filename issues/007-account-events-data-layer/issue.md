@@ -65,4 +65,3 @@ git diff HEAD docs/api/api-spec.md
 - [x] Supabase 구현
 - [x] 백엔드 테스트
 - [ ] 프론트��드 구현 (BE 전담 이슈 — 해당 없음)
-- [ ] E2E 테스트 (수동 트리거)
