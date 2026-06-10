@@ -130,6 +130,8 @@ issue.md의 구현 현황 체크박스(`[x]` / `[ ]`)를 보고 완료된 단계
 #### 트리거
 `.git/hooks/post-commit`에 구현. `docs/planning/` 또는 `docs/design/` 변경이 포함된 커밋에만 반응한다.
 
+동시 실행 방지: `.claude/pipeline.lock/` 디렉토리 락. 파이프라인 실행 중 새 docs 커밋이 들어오면 건너뛰고 알림만 보낸다 (완료 후 `resume-pipeline.sh`로 재개). 동시 실행 시 이슈 번호 채번 레이스, status log 덮어쓰기, `supabase db push` 충돌이 발생하기 때문. 프로세스가 죽어 남은 stale 락은 PID 검사로 자동 회수된다.
+
 ```
 git commit (docs/planning/ 또는 docs/design/ 변경)
   → post-commit hook
@@ -148,6 +150,7 @@ git commit (docs/planning/ 또는 docs/design/ 변경)
 | `.claude/notify.sh` | Telegram + macOS 알림 전송 (`.env.local`에서 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 로드) |
 | `.claude/watch-pipeline.sh` | 실시간 현황 터미널 (`tail -f logs/pipeline-status.log`) |
 | `.claude/resume-pipeline.sh` | 중단된 파이프라인 재개 (issue.md 체크박스 기반) |
+| `.claude/pipeline.lock/` | 동시 실행 방지 락 (실행 중인 파이프라인 PID 보관, 종료 시 자동 삭제) |
 | `.claude/pipeline.log` | 전체 로그 (`--output-format stream-json --verbose`) |
 | `logs/pipeline-status.log` | 한 줄 요약 현황 로그 (오케스트레이터가 직접 기록) |
 

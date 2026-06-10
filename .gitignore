@@ -51,6 +51,7 @@ __pycache__/
 scripts/.venv/
 
 # claude pipeline
+.claude/pipeline.lock/
 .claude/*.log
 .claude/settings.local.json
 logs/
