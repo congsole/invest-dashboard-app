@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: 8a65984 — 2026-06-10*
+*최종 업데이트: 322ddfb — 2026-06-11*
 
 ## 테이블
 
@@ -533,3 +533,4 @@ user_category_stocks }o--|| stocks : "N:1 (stock_id FK, cascade)"
 | [008] 섹터 검색 (7b29cbe) | DB 스키마(테이블/컬럼/인덱스/RLS) 변경 없음. 섹터 검색은 순수 프론트엔드 기능으로, 기존 sectors 테이블의 name/name_en/parent_id/level 컬럼으로 클라이언트 사이드 breadcrumb 구축 및 필터링을 모두 처리한다. |
 | [009] 사용자 카테고리 (5872267) | user_categories 테이블 신규 추가 (user_id FK, name, unique(user_id, name), 인덱스 idx_user_categories_user_id). user_category_stocks junction 테이블 신규 추가 (category_id+stock_id 복합 PK, 각각 cascade FK, created_at, 인덱스 idx_user_category_stocks_stock_id). memo_categories junction 테이블 신규 추가 (memo_id+category_id 복합 PK, 각각 cascade FK, 인덱스 idx_memo_categories_category_id, 카테고리 필터 쿼리 패턴 기록). ERD 관계 5건 추가: auth.users→user_categories, user_categories→user_category_stocks, user_category_stocks→stocks, memos→memo_categories, memo_categories→user_categories. |
 | [010] 당일 스냅샷 수동 새로고침 (8a65984) | snapshot_refresh_quotas 테이블 신규 추가 (user_id+quota_date 복합 PK, used_count int default 0 CHECK ≤3, last_refreshed_at timestamptz nullable, RLS: SELECT 본인 조회 / INSERT·UPDATE service_role 전용). daily_snapshots 테이블 설명 수정: 수동 새로고침 upsert 패턴·잠정치 개념 추가, RLS UPDATE를 service_role 전용으로 변경. ERD 관계 1건 추가: auth.users→snapshot_refresh_quotas. |
+| [011] 히스토리 그래프 개편 (322ddfb) | DB 스키마(테이블/컬럼/인덱스/RLS) 변경 없음. 이번 기획 변경(집계 단위 전환, 버킷팅, 배당 마커만 유지, Y축 표시)은 순수 클라이언트 렌더링 변경으로 daily_snapshots 테이블 구조에 영향 없음. 원금 음수 허용은 daily_snapshots.principal_krw에 음수 CHECK 제약이 애초에 없으므로 마이그레이션 불필요. |

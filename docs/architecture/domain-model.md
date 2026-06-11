@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 8a65984 — 2026-06-10*
+*최종 업데이트: 322ddfb — 2026-06-11*
 
 ## 엔터티
 
@@ -310,7 +310,7 @@ yfinance `industry` 문자열 → GICS Sub-Industry(L4) code 매핑 테이블. y
         − Σ(withdraw amount × fx_rate_at_event KRW 환산)
 ```
 
-입출금 시점의 환율을 고정해 KRW로 환산. 원금이 환율 변동에 흔들리지 않게 함. 환율 변동은 평가액 쪽에서만 반영.
+입출금 시점의 환율을 고정해 KRW로 환산. 원금이 환율 변동에 흔들리지 않게 함. 환율 변동은 평가액 쪽에서만 반영. 누적 출금이 누적 입금보다 크면 원금은 음수가 될 수 있으며, 차트 Y축은 이 음수 구간도 0 기준선 아래로 잘리지 않고 렌더링한다.
 
 ### 예수금 (통화별)
 
@@ -387,3 +387,4 @@ c ∈ {KRW, USD, ...}.
 | [008] 섹터 검색 (7b29cbe) | 엔터티·속성·관계 변경 없음. 순수 프론트엔드/서비스 레이어 변경: CascadingSectorMultiPicker에 검색 입력 필드 추가, 전체 섹터 클라이언트 캐시 및 클라이언트 사이드 필터링. 기존 Sector 엔터티의 name/name_en/parent_id/level 속성으로 breadcrumb 구축 및 검색을 모두 처리하므로 DB 스키마 변경 불필요. |
 | [009] 사용자 카테고리 (5872267) | UserCategory 엔터티 신규 추가 (user_id, name, unique(user_id, name)). UserCategoryStock junction 엔터티 신규 추가 (category_id PK+FK, stock_id PK+FK). MemoCategory junction 엔터티 신규 추가 (memo_id PK+FK, category_id PK+FK). 관계 3건 추가: User 1:N UserCategory, UserCategory N:M Stock, Memo N:M UserCategory. 카테고리 필터링 규칙 추가: 종목 경로 + 직접 연결 경로 OR 합산 (섹터 필터와 동일 패턴). |
 | [010] 당일 스냅샷 수동 새로고침 (8a65984) | SnapshotRefreshQuota 엔터티 신규 추가 (user_id+quota_date 복합 PK, used_count, last_refreshed_at). 일 3회 서버 강제 제한용. DailySnapshot 엔터티 설명에 수동 새로고침 upsert 패턴 및 잠정치 개념 추가. 관계 1건 추가: User 1:N SnapshotRefreshQuota. |
+| [011] 히스토리 그래프 개편 (322ddfb) | 엔터티·속성·관계 변경 없음. 계산 규칙 업데이트: 원금 정의에 "누적 출금 > 누적 입금 시 음수 가능, Y축 0 기준선 아래 렌더링 지원" 명시. (UI 변경 사항 — 기간 전환 개념: 조회 범위 → 집계 단위로 재정의, 버킷 4종(일별/주별/월별/연별)으로 변경, 전체 단위 제거. 이벤트 마커: 출금 마커(▽) 제거, 배당 마커(●)만 유지. 버킷팅: 모든 단위에서 daily_snapshots 전체 1회 조회 후 클라이언트 버킷팅. Y축 금액 라벨 표시 추가.) |

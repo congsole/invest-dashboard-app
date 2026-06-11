@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 8a65984 — 2026-06-10*
+*최종 업데이트: 322ddfb — 2026-06-11*
 
 ## 공통
 
@@ -619,25 +619,37 @@ null  // 삭제 성공 시 데이터 없음
 
 ### 자산 히스토리 그래프 데이터 (REST)
 
-`daily_snapshots` 테이블을 기간 필터로 조회하여 3개 라인(원금/평가액/예수금) 데이터와 이벤트 마커(배당/출금)를 반환한다. "일" 기간은 실시간 폴링 데이터를 사용하므로 이 API에서 제외.
+`daily_snapshots` 테이블을 전체 기간 1회 조회하여 3개 라인(원금/평가액/예수금) 데이터와 배당 이벤트 마커를 반환한다. 집계 단위 전환(일별/주별/월별/연별)은 전체 스냅샷을 1회 조회한 뒤 클라이언트에서 버킷팅으로 처리하며, 단위 전환 시 서버 재조회가 발생하지 않는다.
+
+> **집계 단위 개념**: 기간 전환 버튼은 조회 범위가 아니라 집계 단위를 바꾼다. 어느 단위에서든 전체 히스토리를 그리며, 가로 스크롤로 과거를 탐색한다.
+>
+> | 단위 | 버킷 | 버킷 값 | X축 라벨 |
+> |------|------|--------|---------|
+> | 일별 | 1일 | 해당일 스냅샷 | `MM.DD` |
+> | 주별 | 1주 (월요일 시작) | 주 내 마지막 스냅샷 | `MM.DD` (주 시작일) |
+> | 월별 | 1개월 | 월 내 마지막 스냅샷 | `YY.MM` |
+> | 연별 | 1년 | 연 내 마지막 스냅샷 | `YYYY` |
+>
+> 버킷 값은 합계/평균이 아니라 버킷 내 마지막 스냅샷 값이다. 버킷팅은 클라이언트에서 수행한다.
 
 - **방식**: REST (auto-generated) + RPC (이벤트 마커)
-- **호출 (스냅샷)**: `supabase.from('daily_snapshots').select('*').eq('user_id', userId).gte('snapshot_date', from).lte('snapshot_date', to).order('snapshot_date', { ascending: true })`
-- **호출 (이벤트 마커)**: `supabase.rpc('get_history_markers', { p_from, p_to })`
+- **호출 (스냅샷)**: `supabase.from('daily_snapshots').select('*').eq('user_id', userId).order('snapshot_date', { ascending: true })`
+- **호출 (이벤트 마커)**: `supabase.rpc('get_history_markers', {})`
 - **인증**: 필요
 
 **요청 파라미터 (스냅샷 조회)**
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
-| period | `'week' \| 'month' \| 'year' \| 'all'` | Y | 기간 단위. 클라이언트에서 from/to 날짜로 변환 후 쿼리. |
 | asset_type | `'korean_stock' \| 'us_stock' \| 'crypto' \| null` | N | null 또는 미지정이면 전체 (daily_snapshots는 전체 통합 값만 저장). 부문 필터 시 클라이언트에서 account_events 기반으로 별도 계산 필요. |
+
+> 날짜 범위 파라미터(from/to)는 사용하지 않는다. 전체 기간을 1회 조회하고 클라이언트가 집계 단위에 맞게 버킷팅한다.
 
 **응답 (daily_snapshots)**
 ```typescript
 Array<{
   snapshot_date: string           // YYYY-MM-DD
   total_value_krw: number         // 총 평가액 (평가액 라인)
-  principal_krw: number           // 원금 (원금 라인)
+  principal_krw: number           // 원금 (원금 라인, 음수 가능)
   cash_krw: number                // 예수금 KRW
   cash_usd: number                // 예수금 USD
   net_profit_krw: number          // 순수익
@@ -645,18 +657,16 @@ Array<{
 }>
 ```
 
+> `principal_krw`는 누적 출금이 누적 입금을 초과하면 음수가 될 수 있다. 차트 Y축은 0 기준선 아래로 잘리지 않고 렌더링한다.
+
 **응답 (이벤트 마커 — get_history_markers)**
 
-**요청 파라미터**
-| 파라미터 | 타입 | 필수 | 설명 |
-|---------|------|------|------|
-| p_from | string (date) | Y | 마커 조회 시작일 (YYYY-MM-DD) |
-| p_to | string (date) | Y | 마커 조회 종료일 (YYYY-MM-DD) |
+배당 이벤트 마커만 반환한다. 출금 마커는 제거되었다.
 
 ```typescript
 Array<{
   event_date: string              // YYYY-MM-DD
-  event_type: 'dividend' | 'withdraw'
+  event_type: 'dividend'          // 배당 마커(●)만 반환. 출금 마커(▽)는 제거됨.
   amount_krw: number              // KRW 환산 금액 (마커 크기 표현용)
 }>
 ```
@@ -672,24 +682,21 @@ Array<{
 
 ### 스냅샷 조회 (그래프용)
 
-`daily_snapshots` 테이블에서 기간 및 부문 조건으로 데이터를 조회한다. Dashboard 도메인의 자산 히스토리 그래프가 내부적으로 사용하며, 직접 호출도 가능하다.
+`daily_snapshots` 테이블에서 전체 기간 데이터를 조회한다. Dashboard 도메인의 자산 히스토리 그래프가 내부적으로 사용하며, 직접 호출도 가능하다. 집계 단위 전환(일별/주별/월별/연별)은 전체를 1회 조회한 뒤 클라이언트 버킷팅으로 처리하므로 날짜 범위 파라미터를 사용하지 않는다.
 
 - **방식**: REST (auto-generated)
-- **호출**: `supabase.from('daily_snapshots').select('snapshot_date, total_value_krw, principal_krw, cash_krw, cash_usd, net_profit_krw, fx_rate_usd').eq('user_id', userId).gte('snapshot_date', from).lte('snapshot_date', to).order('snapshot_date', { ascending: true })`
+- **호출**: `supabase.from('daily_snapshots').select('snapshot_date, total_value_krw, principal_krw, cash_krw, cash_usd, net_profit_krw, fx_rate_usd').eq('user_id', userId).order('snapshot_date', { ascending: true })`
 - **인증**: 필요
 
 **요청 파라미터 (쿼리)**
-| 파라미터 | 타입 | 필수 | 설명 |
-|---------|------|------|------|
-| from | string (date) | Y | 조회 시작일 (YYYY-MM-DD) |
-| to | string (date) | Y | 조회 종료일 (YYYY-MM-DD) |
+없음 (전체 기간 1회 조회. 클라이언트에서 집계 단위에 맞게 버킷팅 처리)
 
 **응답**
 ```typescript
 Array<{
   snapshot_date: string           // YYYY-MM-DD
   total_value_krw: number
-  principal_krw: number
+  principal_krw: number           // 음수 가능 (누적 출금 > 누적 입금 시)
   cash_krw: number
   cash_usd: number
   net_profit_krw: number
@@ -2031,3 +2038,4 @@ null  // 삭제 성공 시 데이터 없음
 | [008] 섹터 검색 (7b29cbe) | API 시그니처 변경 없음. 섹터 검색은 순수 클라이언트 사이드 기능으로, 기존 섹터 목록 조회(Sector — 섹터 목록 조회)를 파라미터 없이 호출하여 전체 ~273개를 1회 로드한 뒤 클라이언트에서 name/name_en 기준으로 필터링하고 parent_id 체인으로 breadcrumb을 구축한다. 서버 API 추가·변경 없음. |
 | [009] 사용자 카테고리 (5872267) | UserCategory 도메인 신규 추가 (카테고리 목록 조회, 카테고리 생성, 카테고리 수정, 카테고리 삭제, 카테고리 종목 목록 조회, 카테고리에 종목 추가, 카테고리에서 종목 제거). Memo — 메모 생성 RPC(`create_memo_with_links`) `p_category_ids` 파라미터 추가, 응답에 `categories` 배열 추가. 메모 수정 RPC(`update_memo_with_links`) `p_category_ids` 파라미터 추가(null=변경 없음, 빈 배열=전체 해제), 응답에 `categories` 배열 추가. 메모 목록 조회 RPC(`list_memos`) `p_category_ids` 파라미터 추가(종목 경로+직접 연결 경로 OR 합산, 다른 필터와 AND 결합), 응답 memos 배열 내 `categories` 배열 추가, 필터 결합 규칙에 카테고리 행 추가, `p_no_links` 설명에 카테고리 연결 메모 제외 기준 명시. 메모 상세 조회 REST select에 `memo_categories(category_id, user_categories(id, name))` join 추가, 응답에 `memo_categories` 배열 추가. 메모 엔티티 연결 추가에 카테고리 연결 추가(`memo_categories.insert`) 추가. 메모 엔티티 연결 해제에 카테고리 연결 해제(`memo_categories.delete`) 추가. |
 | [010] 당일 스냅샷 수동 새로고침 (8a65984) | DailySnapshot — 당일 스냅샷 수동 새로고침 Edge Function(`refresh-today-snapshot`) 신규 추가: current_prices + fx_rate_usd 전달 → account_events 집계 → daily_snapshots upsert → snapshot_refresh_quotas used_count 증가, 갱신 성공 후에만 횟수 차감, 일 3회 초과 시 429 반환(횟수 미차감), 502 실패 시 횟수 미차감. 스냅샷 새로고침 쿼터 조회 REST API 신규 추가(`snapshot_refresh_quotas` SELECT, quota_date=KST 오늘, 행 없으면 used_count=0 처리). |
+| [011] 히스토리 그래프 개편 (322ddfb) | Dashboard — 자산 히스토리 그래프 데이터 수정: (1) 스냅샷 조회를 기간 필터(from/to) 방식에서 전체 기간 1회 조회로 변경 (`period` 파라미터 제거, from/to 파라미터 제거). (2) 집계 단위 전환 개념 명세 추가 (일별/주별/월별/연별 버킷 정의, 버킷 값 = 버킷 내 마지막 스냅샷 값, 버킷팅은 클라이언트 수행). (3) `get_history_markers` RPC 응답 타입 변경: `'withdraw'` 제거 → `'dividend'`만 반환. (4) `principal_krw` 음수 가능 주석 추가. DailySnapshot — 스냅샷 조회(그래프용) 수정: from/to 파라미터 제거, 전체 기간 1회 조회로 변경, `principal_krw` 음수 가능 주석 추가. |
