@@ -3,12 +3,10 @@ import {
   getKpiSummary,
   getDailySnapshots,
   getHistoryMarkers,
-  periodToDateRange,
 } from '../services/dashboard';
 import { getMarketPrices, getExchangeRate } from '../services/market';
 import {
   AssetType,
-  Period,
   KpiSummary,
   KpiCardData,
   HoldingCardData,
@@ -41,6 +39,7 @@ const EMPTY_KPI: KpiCardData = {
 interface UseDashboardResult {
   kpi: KpiCardData;
   holdings: HoldingCardData[];
+  /** 전체 기간 스냅샷 원본 데이터 (클라이언트 버킷팅에 사용) */
   snapshots: DailySnapshot[];
   markers: HistoryMarker[];
   exchangeRate: ExchangeRateResponse | null;
@@ -49,7 +48,8 @@ interface UseDashboardResult {
   historyLoading: boolean;
   error: string | null;
   refetch: () => void;
-  fetchHistory: (period: Period, assetType?: AssetType | null) => void;
+  /** @deprecated 이슈 028: period는 집계 단위로 변경됨. 호출 불필요 — 버킷팅은 컴포넌트에서 처리. */
+  fetchHistory: (assetType?: AssetType | null) => void;
 }
 
 // ────────────────────────────────────────────
@@ -216,21 +216,15 @@ export function useDashboard(): UseDashboardResult {
   }, []);
 
   // ── 히스토리 그래프 데이터 패칭 ──
+  // 이슈 028: 전체 기간 1회 조회 후 클라이언트에서 버킷팅 처리.
+  // 집계 단위 전환 시 서버 재호출 없음.
   const fetchHistory = useCallback(
-    async (period: Period, _assetType: AssetType | null = null) => {
-      // 'day' 기간은 daily_snapshots 미사용 (실시간 폴링 데이터)
-      if (period === 'day') {
-        setSnapshots([]);
-        setMarkers([]);
-        return;
-      }
-
+    async (_assetType: AssetType | null = null) => {
       setHistoryLoading(true);
       try {
-        const { from, to } = periodToDateRange(period);
         const [snapshotData, markerData] = await Promise.all([
-          getDailySnapshots(from, to),
-          getHistoryMarkers(from, to),
+          getDailySnapshots(),
+          getHistoryMarkers(),
         ]);
         setSnapshots(snapshotData);
         setMarkers(markerData);
@@ -248,7 +242,7 @@ export function useDashboard(): UseDashboardResult {
   }, [fetchData]);
 
   useEffect(() => {
-    fetchHistory('month');
+    fetchHistory();
   }, [fetchHistory]);
 
   return {

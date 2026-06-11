@@ -17,7 +17,7 @@ import { AssetHistoryChart } from '../components/AssetHistoryChart';
 import { HoldingCard } from '../components/HoldingCard';
 import { AccountEventBottomSheet } from '../components/AccountEventBottomSheet';
 import { StockDetailSheet, assetTypeToMarket } from '../components/StockDetailSheet';
-import { AssetType, Period, HoldingCardData, DailySnapshot } from '../types/dashboard';
+import { AssetType, HoldingCardData, DailySnapshot } from '../types/dashboard';
 import { supabase } from '../utils/supabase';
 
 // ────────────────────────────────────────────
@@ -62,7 +62,6 @@ function groupHoldings(
 
 export function DashboardScreen() {
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
-  const [selectedPeriod, setSelectedPeriod] = useState<Period>('month');
   const [sheetVisible, setSheetVisible] = useState(false);
   // 종목 상세 시트
   const [selectedHolding, setSelectedHolding] = useState<{ ticker: string; assetType: AssetType } | null>(null);
@@ -78,7 +77,6 @@ export function DashboardScreen() {
     historyLoading,
     error,
     refetch,
-    fetchHistory,
   } = useDashboard();
 
   // ── 스냅샷 새로고침 훅 ──
@@ -154,20 +152,10 @@ export function DashboardScreen() {
   const handleFilterChange = useCallback(
     (tab: FilterTab) => {
       setFilterTab(tab);
-      // 그래프는 서버 집계 필요 → 히스토리만 재조회 (기존 콘텐츠 유지)
-      const newAssetType = tab === 'all' ? null : (tab as AssetType);
-      fetchHistory(selectedPeriod, newAssetType);
+      // 이슈 028: 부문 필터 변경 시에도 히스토리 서버 재조회는 하지 않는다.
+      // 집계 단위 전환과 부문 필터는 모두 클라이언트 처리.
     },
-    [fetchHistory, selectedPeriod],
-  );
-
-  const handlePeriodChange = useCallback(
-    (period: Period) => {
-      setSelectedPeriod(period);
-      const assetType = filterTab === 'all' ? null : (filterTab as AssetType);
-      fetchHistory(period, assetType);
-    },
-    [fetchHistory, filterTab],
+    [],
   );
 
   const handleEventSuccess = useCallback(() => {
@@ -273,7 +261,6 @@ export function DashboardScreen() {
             markers={markers}
             loading={historyLoading}
             showCashLine={filterTab === 'all'}
-            onPeriodChange={handlePeriodChange}
             quota={quota}
             refreshing={snapshotRefreshing}
             onRefresh={handleGraphRefresh}

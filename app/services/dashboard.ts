@@ -21,41 +21,14 @@ import {
 // 날짜 유틸
 // ────────────────────────────────────────────
 
-function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 /**
- * period를 from/to 날짜 쌍으로 변환한다.
- * 'day'는 daily_snapshots를 사용하지 않으므로 오늘 날짜만 반환.
+ * @deprecated 이슈 028: period는 이제 집계 단위(버킷 크기)를 의미하며 날짜 범위 변환이 불필요하다.
+ * 하위 호환을 위해 남겨두되 내부적으로 사용하지 않는다.
  */
-export function periodToDateRange(period: Period): { from: string; to: string } {
+export function periodToDateRange(_period: Period): { from: string; to: string } {
   const today = new Date();
-  const to = toDateStr(today);
-
-  switch (period) {
-    case 'day': {
-      return { from: to, to };
-    }
-    case 'week': {
-      const from = new Date(today);
-      from.setDate(from.getDate() - 7);
-      return { from: toDateStr(from), to };
-    }
-    case 'month': {
-      const from = new Date(today);
-      from.setMonth(from.getMonth() - 1);
-      return { from: toDateStr(from), to };
-    }
-    case 'year': {
-      const from = new Date(today);
-      from.setFullYear(from.getFullYear() - 1);
-      return { from: toDateStr(from), to };
-    }
-    case 'all': {
-      return { from: '2000-01-01', to };
-    }
-  }
+  const to = today.toISOString().slice(0, 10);
+  return { from: '2000-01-01', to };
 }
 
 // ────────────────────────────────────────────
@@ -95,41 +68,47 @@ export async function getKpiSummary(
 // ────────────────────────────────────────────
 
 /**
- * 기간 단위별 daily_snapshots를 조회한다.
+ * 전체 기간 daily_snapshots를 조회한다.
+ * 이슈 028: from/to 파라미터 제거 — 집계 단위 전환은 클라이언트에서 버킷팅으로 처리한다.
+ *
+ * Supabase REST는 요청당 최대 1,000행만 반환하므로 페이지 단위로 나눠 받는다.
+ * (전체 히스토리가 1,000일을 넘으면 단건 조회로는 최근 데이터가 잘린다)
  */
-export async function getDailySnapshots(
-  from: string,
-  to: string,
-): Promise<DailySnapshot[]> {
+const SNAPSHOT_PAGE_SIZE = 1000;
+
+export async function getDailySnapshots(): Promise<DailySnapshot[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('인증 필요');
 
-  const { data, error } = await supabase
-    .from('daily_snapshots')
-    .select(
-      'snapshot_date, total_value_krw, principal_krw, cash_krw, cash_usd, net_profit_krw, fx_rate_usd',
-    )
-    .eq('user_id', user.id)
-    .gte('snapshot_date', from)
-    .lte('snapshot_date', to)
-    .order('snapshot_date', { ascending: true });
+  const all: DailySnapshot[] = [];
+  for (let offset = 0; ; offset += SNAPSHOT_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('daily_snapshots')
+      .select(
+        'snapshot_date, total_value_krw, principal_krw, cash_krw, cash_usd, net_profit_krw, fx_rate_usd',
+      )
+      .eq('user_id', user.id)
+      .order('snapshot_date', { ascending: true })
+      .range(offset, offset + SNAPSHOT_PAGE_SIZE - 1);
 
-  if (error) throw error;
-  return (data ?? []) as DailySnapshot[];
+    if (error) throw error;
+    const batch = (data ?? []) as DailySnapshot[];
+    all.push(...batch);
+    if (batch.length < SNAPSHOT_PAGE_SIZE) return all;
+  }
 }
 
 // ────────────────────────────────────────────
 // 이벤트 마커 조회 (get_history_markers RPC)
 // ────────────────────────────────────────────
 
-export async function getHistoryMarkers(
-  from: string,
-  to: string,
-): Promise<HistoryMarker[]> {
-  const { data, error } = await supabase.rpc('get_history_markers', {
-    p_from: from,
-    p_to: to,
-  });
+/**
+ * 배당 이벤트 마커를 조회한다.
+ * 이슈 028: p_from/p_to 파라미터 제거 — 전체 기간 배당 마커를 반환한다.
+ * 출금 마커(▽)는 RPC에서 제거되어 배당 마커(●)만 반환된다.
+ */
+export async function getHistoryMarkers(): Promise<HistoryMarker[]> {
+  const { data, error } = await supabase.rpc('get_history_markers', {});
 
   if (error) throw error;
   return (data ?? []) as HistoryMarker[];

@@ -973,6 +973,10 @@ describe('get_kpi_summary RPC', () => {
   });
 });
 
+// ════════════════════════════════════════════
+// [028] get_history_markers RPC — 파라미터 없음, 배당만 반환
+// ════════════════════════════════════════════
+
 describe('get_history_markers RPC', () => {
   const createdIds: string[] = [];
 
@@ -984,20 +988,18 @@ describe('get_history_markers RPC', () => {
   });
 
   it('미인증 상태에서 호출 시 에러 반환', async () => {
+    // 이슈 028: 파라미터 없는 시그니처로 변경
     const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false },
     });
 
-    const { error } = await anonClient.rpc('get_history_markers', {
-      p_from: '2026-01-01',
-      p_to: '2026-12-31',
-    });
+    const { error } = await anonClient.rpc('get_history_markers');
 
     expect(error).not.toBeNull();
   });
 
-  it('배당/출금 이벤트 마커 반환 검증', async () => {
-    // 배당 이벤트 (KRW) 삽입
+  it('배당 이벤트 마커 반환 검증 — event_date/event_type/amount_krw 구조 포함', async () => {
+    // 이슈 028: 배당 마커만 반환한다
     const { data: div, error: e1 } = await userClient
       .from('account_events')
       .insert({
@@ -1018,8 +1020,26 @@ describe('get_history_markers RPC', () => {
     expect(e1).toBeNull();
     createdIds.push(div!.id);
 
-    // 출금 이벤트 (KRW) 삽입
-    const { data: wdraw, error: e2 } = await userClient
+    // 파라미터 없이 호출 (이슈 028 변경)
+    const { data, error } = await userClient.rpc('get_history_markers');
+
+    expect(error).toBeNull();
+    expect(Array.isArray(data)).toBe(true);
+
+    const divMarker = (data as any[]).find(
+      (r: any) => r.event_type === 'dividend' && r.event_date === '2026-02-10'
+    );
+    expect(divMarker).toBeDefined();
+    expect(divMarker).toHaveProperty('event_date');
+    expect(divMarker).toHaveProperty('event_type');
+    expect(divMarker).toHaveProperty('amount_krw');
+    // KRW 배당은 그대로 반환
+    expect(Number(divMarker.amount_krw)).toBeCloseTo(50000, 0);
+  });
+
+  it('withdraw 이벤트는 마커에 포함되지 않음 (이슈 028: withdraw 필터 제거)', async () => {
+    // 출금 이벤트 삽입
+    const { data: wdraw, error: e1 } = await userClient
       .from('account_events')
       .insert({
         event_type: 'withdraw',
@@ -1033,33 +1053,18 @@ describe('get_history_markers RPC', () => {
       .select()
       .single();
 
-    expect(e2).toBeNull();
+    expect(e1).toBeNull();
     createdIds.push(wdraw!.id);
 
-    const { data, error } = await userClient.rpc('get_history_markers', {
-      p_from: '2026-02-01',
-      p_to: '2026-02-28',
-    });
+    // 파라미터 없이 호출
+    const { data, error } = await userClient.rpc('get_history_markers');
 
     expect(error).toBeNull();
-    expect(Array.isArray(data)).toBe(true);
-
-    // 반환 구조 검증
-    const divMarker = (data as any[]).find(
-      (r: any) => r.event_type === 'dividend' && r.event_date === '2026-02-10'
-    );
-    expect(divMarker).toBeDefined();
-    expect(divMarker).toHaveProperty('event_date');
-    expect(divMarker).toHaveProperty('event_type');
-    expect(divMarker).toHaveProperty('amount_krw');
-    // KRW 배당은 그대로 반환
-    expect(Number(divMarker.amount_krw)).toBeCloseTo(50000, 0);
-
+    // withdraw 마커는 반환되지 않아야 함
     const wdrawMarker = (data as any[]).find(
-      (r: any) => r.event_type === 'withdraw' && r.event_date === '2026-02-15'
+      (r: any) => r.event_type === 'withdraw'
     );
-    expect(wdrawMarker).toBeDefined();
-    expect(Number(wdrawMarker.amount_krw)).toBeCloseTo(200000, 0);
+    expect(wdrawMarker).toBeUndefined();
   });
 
   it('buy 이벤트는 마커에 포함되지 않음', async () => {
@@ -1086,24 +1091,23 @@ describe('get_history_markers RPC', () => {
     expect(e1).toBeNull();
     createdIds.push(buy!.id);
 
-    const { data, error } = await userClient.rpc('get_history_markers', {
-      p_from: '2026-03-01',
-      p_to: '2026-03-31',
-    });
+    // 파라미터 없이 호출 (이슈 028 변경)
+    const { data, error } = await userClient.rpc('get_history_markers');
 
     expect(error).toBeNull();
     const buyMarker = (data as any[]).find((r: any) => r.event_type === 'buy');
     expect(buyMarker).toBeUndefined();
   });
 
-  it('기간 외 이벤트는 마커에 포함되지 않음', async () => {
+  it('전체 기간 조회: 과거 배당도 반환됨 (날짜 범위 파라미터 없음)', async () => {
+    // 이슈 028: p_from/p_to 제거 — 전체 기간 반환
     const { data: div, error: e1 } = await userClient
       .from('account_events')
       .insert({
         event_type: 'dividend',
-        event_date: '2025-06-01',
-        ticker: `OUTRANGE${RUN_ID}`,
-        name: 'Out Of Range',
+        event_date: '2020-06-01',
+        ticker: `OLDIV${RUN_ID}`,
+        name: 'Old Dividend',
         currency: 'KRW',
         amount: 10000,
         tax: 1000,
@@ -1117,15 +1121,14 @@ describe('get_history_markers RPC', () => {
     expect(e1).toBeNull();
     createdIds.push(div!.id);
 
-    const { data, error } = await userClient.rpc('get_history_markers', {
-      p_from: '2026-01-01',
-      p_to: '2026-12-31',
-    });
+    // 파라미터 없이 호출 — 날짜 관계없이 전체 기간 배당 반환
+    const { data, error } = await userClient.rpc('get_history_markers');
 
     expect(error).toBeNull();
-    const outRangeMarker = (data as any[]).find(
-      (r: any) => r.event_date === '2025-06-01'
+    // 2020년 과거 배당도 반환되어야 함
+    const oldMarker = (data as any[]).find(
+      (r: any) => r.event_date === '2020-06-01'
     );
-    expect(outRangeMarker).toBeUndefined();
+    expect(oldMarker).toBeDefined();
   });
 });

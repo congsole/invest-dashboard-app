@@ -3,7 +3,17 @@
 // ────────────────────────────────────────────
 
 export type AssetType = 'korean_stock' | 'us_stock' | 'crypto';
-export type Period = 'day' | 'week' | 'month' | 'year' | 'all';
+/**
+ * Period: 이제 "집계 단위"를 나타낸다.
+ * - 어느 단위에서든 전체 히스토리를 표시하며, 가로 스크롤로 탐색한다.
+ * - 'all'은 제거되었다 (이슈 028).
+ */
+export type Period = 'day' | 'week' | 'month' | 'year';
+
+/**
+ * BucketUnit: 클라이언트 버킷팅에 사용하는 집계 단위 (Period와 동일 범주)
+ */
+export type BucketUnit = 'day' | 'week' | 'month' | 'year';
 
 // ────────────────────────────────────────────
 // KPI 데이터 (get_kpi_summary RPC)
@@ -57,8 +67,30 @@ export interface DailySnapshot {
 
 export interface HistoryMarker {
   event_date: string; // YYYY-MM-DD
-  event_type: 'dividend' | 'withdraw';
+  /** 이슈 028: 배당 마커(●)만 반환. 출금 마커(▽)는 제거됨. */
+  event_type: 'dividend';
   amount_krw: number;
+}
+
+// ────────────────────────────────────────────
+// 클라이언트 버킷팅 결과
+// ────────────────────────────────────────────
+
+/**
+ * BucketedSnapshot: 집계 단위로 버킷팅된 스냅샷.
+ * 버킷 값은 버킷 내 마지막 스냅샷 값이다.
+ */
+export interface BucketedSnapshot {
+  /** 버킷 대표 날짜 (일별: 해당일, 주별: 주 시작일(월요일), 월별: 월 첫째날, 연별: 연 첫째날) */
+  bucket_date: string;
+  /** X축 라벨 (일별·주별: MM.DD, 월별·연별: YY.MM 또는 YYYY) */
+  x_label: string;
+  total_value_krw: number;
+  principal_krw: number;
+  cash_krw: number;
+  cash_usd: number;
+  net_profit_krw: number;
+  fx_rate_usd: number;
 }
 
 // ────────────────────────────────────────────
