@@ -129,6 +129,21 @@ export interface KpiCardData {
 }
 
 // ────────────────────────────────────────────
+// 스냅샷 새로고침 쿼터 (snapshot_refresh_quotas)
+// ────────────────────────────────────────────
+
+export interface SnapshotRefreshQuota {
+  used_count: number;        // 오늘 소진한 횟수 (0~3)
+  remaining: number;         // 남은 횟수 (= 3 − used_count)
+  last_refreshed_at: string | null; // 마지막 갱신 시각. 오늘 미사용 시 null.
+}
+
+export interface RefreshTodaySnapshotResponse {
+  snapshot: DailySnapshot;
+  quota: SnapshotRefreshQuota;
+}
+
+// ────────────────────────────────────────────
 // (레거시 — 하위 호환용, 점진적 제거 예정)
 // ────────────────────────────────────────────
 

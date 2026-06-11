@@ -10,13 +10,14 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useDashboard } from '../hooks/useDashboard';
+import { useSnapshotRefresh } from '../hooks/useSnapshotRefresh';
 import { SectorFilterTabs, FilterTab } from '../components/SectorFilterTabs';
 import { KpiCardSection } from '../components/KpiCardSection';
 import { AssetHistoryChart } from '../components/AssetHistoryChart';
 import { HoldingCard } from '../components/HoldingCard';
 import { AccountEventBottomSheet } from '../components/AccountEventBottomSheet';
 import { StockDetailSheet, assetTypeToMarket } from '../components/StockDetailSheet';
-import { AssetType, Period, HoldingCardData } from '../types/dashboard';
+import { AssetType, Period, HoldingCardData, DailySnapshot } from '../types/dashboard';
 import { supabase } from '../utils/supabase';
 
 // ────────────────────────────────────────────
@@ -69,7 +70,7 @@ export function DashboardScreen() {
   const {
     kpi,
     holdings: allHoldings,
-    snapshots,
+    snapshots: baseSnapshots,
     markers,
     exchangeRate,
     initialLoading,
@@ -79,6 +80,65 @@ export function DashboardScreen() {
     refetch,
     fetchHistory,
   } = useDashboard();
+
+  // ── 스냅샷 새로고침 훅 ──
+  const {
+    quota,
+    refreshing: snapshotRefreshing,
+    refreshError,
+    handleRefresh: handleSnapshotRefresh,
+    clearRefreshError,
+  } = useSnapshotRefresh();
+
+  // 새로고침으로 갱신된 당일 스냅샷 (오늘 날짜 행만 오버라이드)
+  const [refreshedTodaySnapshot, setRefreshedTodaySnapshot] = useState<DailySnapshot | null>(null);
+
+  /**
+   * 풀다운 새로고침 / 에러 재시도 / 이벤트 등록 후 전체 데이터 재로드 시
+   * 로컬에 캐시된 새로고침 스냅샷을 초기화한다.
+   * 서버에서 최신 baseSnapshots를 가져오므로 로컬 오버라이드가 불필요하다.
+   */
+  const handleRefetchAll = useCallback(() => {
+    setRefreshedTodaySnapshot(null);
+    refetch();
+  }, [refetch]);
+
+  /**
+   * 새로고침 응답의 당일 스냅샷으로 그래프를 즉시 갱신한다.
+   * daily_snapshots 배열에서 오늘 날짜 행만 교체하거나, 없으면 끝에 추가한다.
+   */
+  const snapshots = useMemo(() => {
+    if (!refreshedTodaySnapshot) return baseSnapshots;
+    const todayDate = refreshedTodaySnapshot.snapshot_date;
+    const exists = baseSnapshots.some((s) => s.snapshot_date === todayDate);
+    if (exists) {
+      return baseSnapshots.map((s) =>
+        s.snapshot_date === todayDate ? refreshedTodaySnapshot : s,
+      );
+    }
+    return [...baseSnapshots, refreshedTodaySnapshot];
+  }, [baseSnapshots, refreshedTodaySnapshot]);
+
+  // 새로고침 버튼 탭 핸들러 — exchangeRate와 현재가를 useDashboard에서 가져와 전달
+  const handleGraphRefresh = useCallback(() => {
+    if (!exchangeRate) return;
+    // holdings에서 현재가 목록을 재구성
+    // holdings는 HoldingCardData이므로 MarketPriceItem 형태로 변환
+    const currentPrices = allHoldings
+      .filter((h) => h.current_price_orig !== null)
+      .map((h) => ({
+        ticker: h.ticker,
+        asset_type: h.asset_type,
+        price: h.current_price_orig as number,
+        currency: h.currency,
+        fetched_at: h.price_fetched_at ?? new Date().toISOString(),
+        is_cached: h.is_price_cached,
+      }));
+
+    handleSnapshotRefresh(currentPrices, exchangeRate.rate, (snapshot) => {
+      setRefreshedTodaySnapshot(snapshot);
+    });
+  }, [exchangeRate, allHoldings, handleSnapshotRefresh]);
 
   // 탭 필터는 클라이언트 사이드로 처리 — 네트워크 재호출 없음
   const filteredHoldings = useMemo(
@@ -112,8 +172,8 @@ export function DashboardScreen() {
 
   const handleEventSuccess = useCallback(() => {
     setSheetVisible(false);
-    refetch();
-  }, [refetch]);
+    handleRefetchAll();
+  }, [handleRefetchAll]);
 
   const handleHoldingPress = useCallback((item: HoldingCardData) => {
     setSelectedHolding({ ticker: item.ticker, assetType: item.asset_type });
@@ -171,17 +231,27 @@ export function DashboardScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={refetch}
+            onRefresh={handleRefetchAll}
             tintColor="#003ec7"
           />
         }
       >
-        {/* 에러 배너 */}
+        {/* 에러 배너 — 데이터 로드 오류 */}
         {error && (
           <View style={styles.errorBanner}>
             <Text style={styles.errorBannerText}>{error}</Text>
-            <TouchableOpacity onPress={refetch}>
+            <TouchableOpacity onPress={handleRefetchAll}>
               <Text style={styles.errorBannerRetry}>다시 시도</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* 에러 배너 — 스냅샷 새로고침 오류 */}
+        {refreshError && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>{refreshError}</Text>
+            <TouchableOpacity onPress={clearRefreshError}>
+              <Text style={styles.errorBannerRetry}>닫기</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -204,6 +274,9 @@ export function DashboardScreen() {
             loading={historyLoading}
             showCashLine={filterTab === 'all'}
             onPeriodChange={handlePeriodChange}
+            quota={quota}
+            refreshing={snapshotRefreshing}
+            onRefresh={handleGraphRefresh}
           />
         </View>
 

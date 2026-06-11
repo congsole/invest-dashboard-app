@@ -13,6 +13,8 @@ import {
   DailySnapshot,
   HistoryMarker,
   MarketPriceItem,
+  SnapshotRefreshQuota,
+  RefreshTodaySnapshotResponse,
 } from '../types/dashboard';
 
 // ────────────────────────────────────────────
@@ -131,6 +133,121 @@ export async function getHistoryMarkers(
 
   if (error) throw error;
   return (data ?? []) as HistoryMarker[];
+}
+
+// ────────────────────────────────────────────
+// 당일 스냅샷 수동 새로고침 (refresh-today-snapshot Edge Function)
+// ────────────────────────────────────────────
+
+/**
+ * 오늘자 스냅샷을 즉시 재계산·저장한다. 일 3회 제한을 서버에서 강제한다.
+ *
+ * @param currentPrices get-market-prices Edge Function 응답의 prices 배열
+ * @param fxRateUsd     get-exchange-rate Edge Function 응답의 rate 값
+ * @returns 갱신된 스냅샷 행과 남은 쿼터
+ * @throws 400 — current_prices 비어 있거나 형식 오류, fx_rate_usd <= 0
+ * @throws 401 — 인증 토큰 없음 또는 만료
+ * @throws 422 — account_events 없음
+ * @throws 429 — 일 3회 제한 초과 (횟수 미차감)
+ * @throws 502 — 내부 계산·저장 실패 (횟수 미차감)
+ */
+export async function refreshTodaySnapshot(
+  currentPrices: MarketPriceItem[],
+  fxRateUsd: number,
+): Promise<RefreshTodaySnapshotResponse> {
+  const { data, error } = await supabase.functions.invoke<RefreshTodaySnapshotResponse>(
+    'refresh-today-snapshot',
+    {
+      body: {
+        current_prices: currentPrices.map((p) => ({
+          ticker:     p.ticker,
+          asset_type: p.asset_type,
+          price:      p.price,
+          currency:   p.currency,
+        })),
+        fx_rate_usd: fxRateUsd,
+      },
+    },
+  );
+
+  if (error) {
+    // FunctionsHttpError에는 context.responseBody가 있다
+    const body =
+      error && typeof (error as { context?: { responseBody?: string } }).context?.responseBody === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(
+                (error as { context: { responseBody: string } }).context.responseBody,
+              ) as { error?: { code?: string; message?: string } };
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+
+    const code    = body?.error?.code ?? 'UNKNOWN';
+    const message = body?.error?.message ?? error.message;
+    const httpStatus = parseInt(code, 10);
+
+    const enriched = new Error(`[refresh-today-snapshot] ${code}: ${message}`);
+    (enriched as Error & { status?: number }).status = isNaN(httpStatus) ? undefined : httpStatus;
+    throw enriched;
+  }
+
+  if (!data) {
+    throw new Error('[refresh-today-snapshot] 응답 데이터가 없습니다.');
+  }
+
+  return data;
+}
+
+// ────────────────────────────────────────────
+// 스냅샷 새로고침 쿼터 조회 (snapshot_refresh_quotas REST)
+// ────────────────────────────────────────────
+
+/**
+ * KST 기준 오늘 날짜 문자열(YYYY-MM-DD)을 반환한다.
+ */
+export function getTodayKst(): string {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10);
+}
+
+/**
+ * 오늘자 수동 새로고침 남은 횟수를 조회한다.
+ * `snapshot_refresh_quotas`에 오늘자 행이 없으면 used_count=0(오늘 미사용)으로 반환한다.
+ *
+ * @returns SnapshotRefreshQuota — used_count(0~3), remaining(0~3), last_refreshed_at
+ * @throws 401 — 인증 토큰 없음 또는 만료
+ */
+export async function getSnapshotRefreshQuota(): Promise<SnapshotRefreshQuota> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('인증 필요');
+
+  const todayKst = getTodayKst();
+
+  const { data, error } = await supabase
+    .from('snapshot_refresh_quotas')
+    .select('used_count, last_refreshed_at')
+    .eq('user_id', user.id)
+    .eq('quota_date', todayKst)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  // 행이 없으면 오늘 한 번도 사용하지 않은 것
+  if (!data) {
+    return { used_count: 0, remaining: 3, last_refreshed_at: null };
+  }
+
+  return {
+    used_count:        data.used_count,
+    remaining:         3 - data.used_count,
+    last_refreshed_at: data.last_refreshed_at ?? null,
+  };
 }
 
 // ────────────────────────────────────────────

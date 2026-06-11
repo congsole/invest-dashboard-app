@@ -8,7 +8,8 @@ import {
   Dimensions,
 } from 'react-native';
 import { LineChart } from 'react-native-gifted-charts';
-import { DailySnapshot, HistoryMarker, Period } from '../types/dashboard';
+import { DailySnapshot, HistoryMarker, Period, SnapshotRefreshQuota } from '../types/dashboard';
+import { MAX_SNAPSHOT_QUOTA } from '../hooks/useSnapshotRefresh';
 
 // ────────────────────────────────────────────
 // 상수 / 유틸
@@ -42,6 +43,10 @@ interface AssetHistoryChartProps {
   loading: boolean;
   showCashLine: boolean; // 부문 필터가 "전체"일 때만 true
   onPeriodChange: (period: Period) => void;
+  // ── 새로고침 버튼 관련 ──
+  quota: SnapshotRefreshQuota;
+  refreshing: boolean;
+  onRefresh: () => void;
 }
 
 // ────────────────────────────────────────────
@@ -54,6 +59,9 @@ export const AssetHistoryChart = memo(function AssetHistoryChart({
   loading,
   showCashLine,
   onPeriodChange,
+  quota,
+  refreshing,
+  onRefresh,
 }: AssetHistoryChartProps) {
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('month');
 
@@ -64,6 +72,9 @@ export const AssetHistoryChart = memo(function AssetHistoryChart({
     },
     [onPeriodChange],
   );
+
+  const isExhausted = quota.remaining <= 0;
+  const isRefreshDisabled = isExhausted || refreshing || loading;
 
   // ── 차트 데이터 변환 ──
   // gifted-charts LineChart: data(총평가액), data2(원금), data3(예수금)
@@ -90,7 +101,43 @@ export const AssetHistoryChart = memo(function AssetHistoryChart({
     <View style={styles.card}>
       {/* 헤더 */}
       <View style={styles.header}>
-        <Text style={styles.title}>자산 히스토리</Text>
+        {/* 좌측: 제목 + 새로고침 버튼 */}
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>자산 히스토리</Text>
+          <TouchableOpacity
+            style={[
+              styles.refreshButton,
+              isRefreshDisabled && styles.refreshButtonDisabled,
+            ]}
+            onPress={onRefresh}
+            disabled={isRefreshDisabled}
+            activeOpacity={0.7}
+            accessibilityLabel={`스냅샷 새로고침. 오늘 남은 횟수 ${quota.remaining}회`}
+          >
+            {refreshing ? (
+              <ActivityIndicator size={12} color="#003ec7" style={styles.refreshSpinner} />
+            ) : (
+              <Text
+                style={[
+                  styles.refreshIcon,
+                  isRefreshDisabled && styles.refreshIconDisabled,
+                ]}
+              >
+                ↻
+              </Text>
+            )}
+            <Text
+              style={[
+                styles.refreshQuota,
+                isRefreshDisabled && styles.refreshQuotaDisabled,
+              ]}
+            >
+              {quota.remaining}/{MAX_SNAPSHOT_QUOTA}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 우측: 기간 선택 */}
         <View style={styles.periodSelector}>
           {PERIODS.map((p) => (
             <TouchableOpacity
@@ -114,6 +161,15 @@ export const AssetHistoryChart = memo(function AssetHistoryChart({
           ))}
         </View>
       </View>
+
+      {/* 횟수 소진 안내 문구 */}
+      {isExhausted && (
+        <View style={styles.exhaustedBanner}>
+          <Text style={styles.exhaustedText}>
+            오늘 새로고침 횟수를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.
+          </Text>
+        </View>
+      )}
 
       {/* 차트 영역 */}
       {loading ? (
@@ -239,10 +295,64 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
   title: {
     fontSize: 16,
     fontWeight: '700',
     color: '#0b1c30',
+  },
+  // ── 새로고침 버튼 ──
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#eff4ff',
+    borderRadius: 20,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  refreshButtonDisabled: {
+    backgroundColor: '#f5f5f8',
+  },
+  refreshSpinner: {
+    width: 14,
+    height: 14,
+  },
+  refreshIcon: {
+    fontSize: 14,
+    color: '#003ec7',
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  refreshIconDisabled: {
+    color: '#b0b3c0',
+  },
+  refreshQuota: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#003ec7',
+    lineHeight: 14,
+  },
+  refreshQuotaDisabled: {
+    color: '#b0b3c0',
+  },
+  // ── 소진 안내 배너 ──
+  exhaustedBanner: {
+    backgroundColor: '#eff4ff',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  exhaustedText: {
+    fontSize: 12,
+    color: '#434656',
+    lineHeight: 17,
   },
   periodSelector: {
     flexDirection: 'row',
