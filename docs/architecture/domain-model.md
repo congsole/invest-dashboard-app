@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 322ddfb — 2026-06-11*
+*최종 업데이트: 30af926 — 2026-06-15*
 
 ## 엔터티
 
@@ -388,3 +388,4 @@ c ∈ {KRW, USD, ...}.
 | [009] 사용자 카테고리 (5872267) | UserCategory 엔터티 신규 추가 (user_id, name, unique(user_id, name)). UserCategoryStock junction 엔터티 신규 추가 (category_id PK+FK, stock_id PK+FK). MemoCategory junction 엔터티 신규 추가 (memo_id PK+FK, category_id PK+FK). 관계 3건 추가: User 1:N UserCategory, UserCategory N:M Stock, Memo N:M UserCategory. 카테고리 필터링 규칙 추가: 종목 경로 + 직접 연결 경로 OR 합산 (섹터 필터와 동일 패턴). |
 | [010] 당일 스냅샷 수동 새로고침 (8a65984) | SnapshotRefreshQuota 엔터티 신규 추가 (user_id+quota_date 복합 PK, used_count, last_refreshed_at). 일 3회 서버 강제 제한용. DailySnapshot 엔터티 설명에 수동 새로고침 upsert 패턴 및 잠정치 개념 추가. 관계 1건 추가: User 1:N SnapshotRefreshQuota. |
 | [011] 히스토리 그래프 개편 (322ddfb) | 엔터티·속성·관계 변경 없음. 계산 규칙 업데이트: 원금 정의에 "누적 출금 > 누적 입금 시 음수 가능, Y축 0 기준선 아래 렌더링 지원" 명시. (UI 변경 사항 — 기간 전환 개념: 조회 범위 → 집계 단위로 재정의, 버킷 4종(일별/주별/월별/연별)으로 변경, 전체 단위 제거. 이벤트 마커: 출금 마커(▽) 제거, 배당 마커(●)만 유지. 버킷팅: 모든 단위에서 daily_snapshots 전체 1회 조회 후 클라이언트 버킷팅. Y축 금액 라벨 표시 추가.) |
+| [PRD-003 §6.4·§6.5] 메모 측 매매이벤트 연결 경로 구체화 (30af926) | 엔터티·속성·관계 변경 없음. MemoTradeEvent junction 및 Memo N:M AccountEvent 관계는 이미 모델링 완료. PRD 개정 내용: 메모 작성/편집 화면에 "매매이벤트" 선택 모달 추가(buy/sell 후보 최신순, 종목명·기간 필터, 복수 선택), 수정 화면에서 연결 추가·해제 지원. §6.5의 "기존 이벤트에 나중에 메모를 붙이는 경로" 표현을 §6.4 경로로 교통정리. 데이터 레이어는 기존 구현 그대로 사용. |

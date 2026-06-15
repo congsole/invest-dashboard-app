@@ -1,6 +1,6 @@
 # DB Schema
 
-*최종 업데이트: 322ddfb — 2026-06-11*
+*최종 업데이트: 30af926 — 2026-06-15*
 
 ## 테이블
 
@@ -534,3 +534,4 @@ user_category_stocks }o--|| stocks : "N:1 (stock_id FK, cascade)"
 | [009] 사용자 카테고리 (5872267) | user_categories 테이블 신규 추가 (user_id FK, name, unique(user_id, name), 인덱스 idx_user_categories_user_id). user_category_stocks junction 테이블 신규 추가 (category_id+stock_id 복합 PK, 각각 cascade FK, created_at, 인덱스 idx_user_category_stocks_stock_id). memo_categories junction 테이블 신규 추가 (memo_id+category_id 복합 PK, 각각 cascade FK, 인덱스 idx_memo_categories_category_id, 카테고리 필터 쿼리 패턴 기록). ERD 관계 5건 추가: auth.users→user_categories, user_categories→user_category_stocks, user_category_stocks→stocks, memos→memo_categories, memo_categories→user_categories. |
 | [010] 당일 스냅샷 수동 새로고침 (8a65984) | snapshot_refresh_quotas 테이블 신규 추가 (user_id+quota_date 복합 PK, used_count int default 0 CHECK ≤3, last_refreshed_at timestamptz nullable, RLS: SELECT 본인 조회 / INSERT·UPDATE service_role 전용). daily_snapshots 테이블 설명 수정: 수동 새로고침 upsert 패턴·잠정치 개념 추가, RLS UPDATE를 service_role 전용으로 변경. ERD 관계 1건 추가: auth.users→snapshot_refresh_quotas. |
 | [011] 히스토리 그래프 개편 (322ddfb) | DB 스키마(테이블/컬럼/인덱스/RLS) 변경 없음. 이번 기획 변경(집계 단위 전환, 버킷팅, 배당 마커만 유지, Y축 표시)은 순수 클라이언트 렌더링 변경으로 daily_snapshots 테이블 구조에 영향 없음. 원금 음수 허용은 daily_snapshots.principal_krw에 음수 CHECK 제약이 애초에 없으므로 마이그레이션 불필요. |
+| [PRD-003 §6.4·§6.5] 메모 측 매매이벤트 연결 경로 구체화 (30af926) | DB 스키마(테이블/컬럼/인덱스/RLS) 변경 없음. memo_trade_events 테이블 및 관련 ERD 관계는 이미 문서화 완료. 이번 PRD 변경은 메모 작성/편집 UI에서 기존 매매이벤트(buy/sell)를 직접 선택·연결하는 경로를 추가하는 것으로, 데이터 레이어는 기존 구현을 그대로 사용한다. |

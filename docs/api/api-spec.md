@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 322ddfb — 2026-06-11*
+*최종 업데이트: 30af926 — 2026-06-15*
 
 ## 공통
 
@@ -314,16 +314,21 @@ supabase.auth.onAuthStateChange(async (event, session) => {
 
 - **방식**: REST (auto-generated)
 - **호출**: `supabase.from('account_events').select('*').eq('user_id', userId)` (필터 조건 추가)
+- **호출 (매매이벤트 선택 모달 — buy/sell 전체, 최신순)**: `supabase.from('account_events').select('*').in('event_type', ['buy', 'sell']).order('event_date', { ascending: false })`
+- **호출 (매매이벤트 선택 모달 — 종목명/티커 검색)**: `.or('name.ilike.%{q}%,ticker.ilike.%{q}%')`를 체이닝
+- **호출 (매매이벤트 선택 모달 — 기간 필터)**: `.gte('event_date', from).lte('event_date', to)`를 체이닝
 - **인증**: 필요
 
 **요청 파라미터 (쿼리)**
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
-| event_type | `'buy' \| 'sell' \| 'deposit' \| 'withdraw' \| 'dividend'` | N | 이벤트 유형 필터 |
+| event_type | `'buy' \| 'sell' \| 'deposit' \| 'withdraw' \| 'dividend'` | N | 이벤트 유형 필터. 복수 지정 시 OR 결합. 매매이벤트 선택 모달에서는 `event_type=in.(buy,sell)` 형태로 호출. |
 | asset_type | `'korean_stock' \| 'us_stock' \| 'crypto' \| 'cash'` | N | 자산 유형 필터 |
-| ticker | string | N | 종목 코드 필터 |
-| from | string (date) | N | 조회 시작일 (YYYY-MM-DD) |
-| to | string (date) | N | 조회 종료일 (YYYY-MM-DD) |
+| ticker | string | N | 종목 코드 정확 매칭 필터 |
+| q | string | N | 종목명(name) 또는 티커(ticker) ilike 검색. 디바운스 300ms 권장. 매매이벤트 선택 모달의 종목 검색란에서 사용. 예: `name.ilike.%{q}%,ticker.ilike.%{q}%` |
+| from | string (date) | N | 조회 시작일 (YYYY-MM-DD, `event_date` 기준) |
+| to | string (date) | N | 조회 종료일 (YYYY-MM-DD, `event_date` 기준) |
+| order | string | N | 정렬 기준. 기본 `event_date.desc`. 매매이벤트 선택 모달은 최신순 고정: `.order('event_date', { ascending: false })` |
 
 **응답**
 ```typescript
@@ -2039,3 +2044,4 @@ null  // 삭제 성공 시 데이터 없음
 | [009] 사용자 카테고리 (5872267) | UserCategory 도메인 신규 추가 (카테고리 목록 조회, 카테고리 생성, 카테고리 수정, 카테고리 삭제, 카테고리 종목 목록 조회, 카테고리에 종목 추가, 카테고리에서 종목 제거). Memo — 메모 생성 RPC(`create_memo_with_links`) `p_category_ids` 파라미터 추가, 응답에 `categories` 배열 추가. 메모 수정 RPC(`update_memo_with_links`) `p_category_ids` 파라미터 추가(null=변경 없음, 빈 배열=전체 해제), 응답에 `categories` 배열 추가. 메모 목록 조회 RPC(`list_memos`) `p_category_ids` 파라미터 추가(종목 경로+직접 연결 경로 OR 합산, 다른 필터와 AND 결합), 응답 memos 배열 내 `categories` 배열 추가, 필터 결합 규칙에 카테고리 행 추가, `p_no_links` 설명에 카테고리 연결 메모 제외 기준 명시. 메모 상세 조회 REST select에 `memo_categories(category_id, user_categories(id, name))` join 추가, 응답에 `memo_categories` 배열 추가. 메모 엔티티 연결 추가에 카테고리 연결 추가(`memo_categories.insert`) 추가. 메모 엔티티 연결 해제에 카테고리 연결 해제(`memo_categories.delete`) 추가. |
 | [010] 당일 스냅샷 수동 새로고침 (8a65984) | DailySnapshot — 당일 스냅샷 수동 새로고침 Edge Function(`refresh-today-snapshot`) 신규 추가: current_prices + fx_rate_usd 전달 → account_events 집계 → daily_snapshots upsert → snapshot_refresh_quotas used_count 증가, 갱신 성공 후에만 횟수 차감, 일 3회 초과 시 429 반환(횟수 미차감), 502 실패 시 횟수 미차감. 스냅샷 새로고침 쿼터 조회 REST API 신규 추가(`snapshot_refresh_quotas` SELECT, quota_date=KST 오늘, 행 없으면 used_count=0 처리). |
 | [011] 히스토리 그래프 개편 (322ddfb) | Dashboard — 자산 히스토리 그래프 데이터 수정: (1) 스냅샷 조회를 기간 필터(from/to) 방식에서 전체 기간 1회 조회로 변경 (`period` 파라미터 제거, from/to 파라미터 제거). (2) 집계 단위 전환 개념 명세 추가 (일별/주별/월별/연별 버킷 정의, 버킷 값 = 버킷 내 마지막 스냅샷 값, 버킷팅은 클라이언트 수행). (3) `get_history_markers` RPC 응답 타입 변경: `'withdraw'` 제거 → `'dividend'`만 반환. (4) `principal_krw` 음수 가능 주석 추가. DailySnapshot — 스냅샷 조회(그래프용) 수정: from/to 파라미터 제거, 전체 기간 1회 조회로 변경, `principal_krw` 음수 가능 주석 추가. |
+| [PRD-003 §6.4·§6.5] 메모 측 매매이벤트 연결 경로 구체화 (30af926) | AccountEvent — 계정 이벤트 목록 조회 API 보강: (1) `q` 파라미터 신규 추가 (종목명·티커 ilike 검색, `name.ilike.%q%` OR `ticker.ilike.%q%`). (2) `order` 파라미터 신규 추가 (기본 `event_date.desc`). (3) `event_type` 파라미터 설명에 복수 지정(OR 결합) 및 매매이벤트 선택 모달 호출 패턴(`in.(buy,sell)`) 명시. (4) `ticker` 파라미터 설명을 "정확 매칭"으로 명확화. (5) 매매이벤트 선택 모달용 호출 패턴 3종 추가 (전체 buy/sell 최신순, 종목명/티커 검색 체이닝, 기간 필터 체이닝). Memo 도메인의 `create_memo_with_links`·`update_memo_with_links` `p_trade_event_ids` 파라미터 및 메모 엔티티 연결 추가/해제(memo_trade_events)는 이미 명세 완료 — 변경 없음. |
