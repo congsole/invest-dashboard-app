@@ -1,6 +1,6 @@
 # Domain Model
 
-*최종 업데이트: 5872267 — 2026-06-09*
+*최종 업데이트: 30af926 — 2026-06-15*
 
 ## 엔터티
 
@@ -373,3 +373,4 @@ c ∈ {KRW, USD, ...}.
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | Stock.name 속성 설명 확장: 메모 리스트형 종목 칩 라벨은 market에 관계없이 항상 name(종목명) 표시 규칙 명시. MemoSector 계층 탐색 규칙 명확화: 직접 연결 경로가 "자신 및 하위 레벨" 임을 명시 (L1 선택 시 L1 자신도 포함). 필터 UI sectorIds 동작 상세화: L2 미로딩 시 L1 id만으로 즉시 필터 적용 가능(RPC 재귀 CTE 보장), 이후 L2 로딩 시 보충 추가, sectorIds에 L1+L2 id 모두 저장 명시. |
 | [008] 섹터 검색 (7b29cbe) | 엔터티·속성·관계 변경 없음. 순수 프론트엔드/서비스 레이어 변경: CascadingSectorMultiPicker에 검색 입력 필드 추가, 전체 섹터 클라이언트 캐시 및 클라이언트 사이드 필터링. 기존 Sector 엔터티의 name/name_en/parent_id/level 속성으로 breadcrumb 구축 및 검색을 모두 처리하므로 DB 스키마 변경 불필요. |
 | [009] 사용자 카테고리 (5872267) | UserCategory 엔터티 신규 추가 (user_id, name, unique(user_id, name)). UserCategoryStock junction 엔터티 신규 추가 (category_id PK+FK, stock_id PK+FK). MemoCategory junction 엔터티 신규 추가 (memo_id PK+FK, category_id PK+FK). 관계 3건 추가: User 1:N UserCategory, UserCategory N:M Stock, Memo N:M UserCategory. 카테고리 필터링 규칙 추가: 종목 경로 + 직접 연결 경로 OR 합산 (섹터 필터와 동일 패턴). |
+| [PRD-003 §6.4·§6.5] 메모 측 매매이벤트 연결 경로 구체화 (30af926) | 엔터티·속성·관계 변경 없음. MemoTradeEvent junction 및 Memo N:M AccountEvent 관계는 이미 모델링 완료. PRD 개정 내용: 메모 작성/편집 화면에 "매매이벤트" 선택 모달 추가(buy/sell 후보 최신순, 종목명·기간 필터, 복수 선택), 수정 화면에서 연결 추가·해제 지원. §6.5의 "기존 이벤트에 나중에 메모를 붙이는 경로" 표현을 §6.4 경로로 교통정리. 데이터 레이어는 기존 구현 그대로 사용. |

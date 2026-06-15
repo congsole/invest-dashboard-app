@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 5872267 — 2026-06-09*
+*최종 업데이트: 30af926 — 2026-06-15*
 
 ## 공통
 
@@ -314,16 +314,21 @@ supabase.auth.onAuthStateChange(async (event, session) => {
 
 - **방식**: REST (auto-generated)
 - **호출**: `supabase.from('account_events').select('*').eq('user_id', userId)` (필터 조건 추가)
+- **호출 (매매이벤트 선택 모달 — buy/sell 전체, 최신순)**: `supabase.from('account_events').select('*').in('event_type', ['buy', 'sell']).order('event_date', { ascending: false })`
+- **호출 (매매이벤트 선택 모달 — 종목명/티커 검색)**: `.or('name.ilike.%{q}%,ticker.ilike.%{q}%')`를 체이닝
+- **호출 (매매이벤트 선택 모달 — 기간 필터)**: `.gte('event_date', from).lte('event_date', to)`를 체이닝
 - **인증**: 필요
 
 **요청 파라미터 (쿼리)**
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
-| event_type | `'buy' \| 'sell' \| 'deposit' \| 'withdraw' \| 'dividend'` | N | 이벤트 유형 필터 |
+| event_type | `'buy' \| 'sell' \| 'deposit' \| 'withdraw' \| 'dividend'` | N | 이벤트 유형 필터. 복수 지정 시 OR 결합. 매매이벤트 선택 모달에서는 `event_type=in.(buy,sell)` 형태로 호출. |
 | asset_type | `'korean_stock' \| 'us_stock' \| 'crypto' \| 'cash'` | N | 자산 유형 필터 |
-| ticker | string | N | 종목 코드 필터 |
-| from | string (date) | N | 조회 시작일 (YYYY-MM-DD) |
-| to | string (date) | N | 조회 종료일 (YYYY-MM-DD) |
+| ticker | string | N | 종목 코드 정확 매칭 필터 |
+| q | string | N | 종목명(name) 또는 티커(ticker) ilike 검색. 디바운스 300ms 권장. 매매이벤트 선택 모달의 종목 검색란에서 사용. 예: `name.ilike.%{q}%,ticker.ilike.%{q}%` |
+| from | string (date) | N | 조회 시작일 (YYYY-MM-DD, `event_date` 기준) |
+| to | string (date) | N | 조회 종료일 (YYYY-MM-DD, `event_date` 기준) |
+| order | string | N | 정렬 기준. 기본 `event_date.desc`. 매매이벤트 선택 모달은 최신순 고정: `.order('event_date', { ascending: false })` |
 
 **응답**
 ```typescript
@@ -1945,3 +1950,4 @@ null  // 삭제 성공 시 데이터 없음
 | [007] 기획서 수정 — 메모 종목 칩·섹터 필터링 (4cb2f12) | API 시그니처 변경 없음. Memo — 메모 목록 조회(list_memos) 섹터 필터 계층 탐색 규칙 수정: 직접 연결 경로를 "지정된 섹터 자신 및 하위 레벨"로 명확화 (기존: "하위 레벨만"), L1 자신에 직접 연결된 메모 포함 예시 추가. 핵심 보장 추가: L1 id만 전달해도 RPC 재귀 CTE가 하위 전체를 포함하므로 L2 로딩 여부와 무관하게 동일한 필터 결과 보장. `p_sector_ids` 파라미터 설명에 "자신 및 하위 레벨" 직접 연결 경로 보장 및 L1 id 단독 전달 시 동작 명시. |
 | [008] 섹터 검색 (7b29cbe) | API 시그니처 변경 없음. 섹터 검색은 순수 클라이언트 사이드 기능으로, 기존 섹터 목록 조회(Sector — 섹터 목록 조회)를 파라미터 없이 호출하여 전체 ~273개를 1회 로드한 뒤 클라이언트에서 name/name_en 기준으로 필터링하고 parent_id 체인으로 breadcrumb을 구축한다. 서버 API 추가·변경 없음. |
 | [009] 사용자 카테고리 (5872267) | UserCategory 도메인 신규 추가 (카테고리 목록 조회, 카테고리 생성, 카테고리 수정, 카테고리 삭제, 카테고리 종목 목록 조회, 카테고리에 종목 추가, 카테고리에서 종목 제거). Memo — 메모 생성 RPC(`create_memo_with_links`) `p_category_ids` 파라미터 추가, 응답에 `categories` 배열 추가. 메모 수정 RPC(`update_memo_with_links`) `p_category_ids` 파라미터 추가(null=변경 없음, 빈 배열=전체 해제), 응답에 `categories` 배열 추가. 메모 목록 조회 RPC(`list_memos`) `p_category_ids` 파라미터 추가(종목 경로+직접 연결 경로 OR 합산, 다른 필터와 AND 결합), 응답 memos 배열 내 `categories` 배열 추가, 필터 결합 규칙에 카테고리 행 추가, `p_no_links` 설명에 카테고리 연결 메모 제외 기준 명시. 메모 상세 조회 REST select에 `memo_categories(category_id, user_categories(id, name))` join 추가, 응답에 `memo_categories` 배열 추가. 메모 엔티티 연결 추가에 카테고리 연결 추가(`memo_categories.insert`) 추가. 메모 엔티티 연결 해제에 카테고리 연결 해제(`memo_categories.delete`) 추가. |
+| [PRD-003 §6.4·§6.5] 메모 측 매매이벤트 연결 경로 구체화 (30af926) | AccountEvent — 계정 이벤트 목록 조회 API 보강: (1) `q` 파라미터 신규 추가 (종목명·티커 ilike 검색, `name.ilike.%q%` OR `ticker.ilike.%q%`). (2) `order` 파라미터 신규 추가 (기본 `event_date.desc`). (3) `event_type` 파라미터 설명에 복수 지정(OR 결합) 및 매매이벤트 선택 모달 호출 패턴(`in.(buy,sell)`) 명시. (4) `ticker` 파라미터 설명을 "정확 매칭"으로 명확화. (5) 매매이벤트 선택 모달용 호출 패턴 3종 추가 (전체 buy/sell 최신순, 종목명/티커 검색 체이닝, 기간 필터 체이닝). Memo 도메인의 `create_memo_with_links`·`update_memo_with_links` `p_trade_event_ids` 파라미터 및 메모 엔티티 연결 추가/해제(memo_trade_events)는 이미 명세 완료 — 변경 없음. |
