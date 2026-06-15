@@ -75,6 +75,7 @@ export function DashboardScreen() {
     initialLoading,
     refreshing,
     historyLoading,
+    priceUpdating,
     error,
     refetch,
   } = useDashboard();
@@ -131,6 +132,8 @@ export function DashboardScreen() {
         currency: h.currency,
         fetched_at: h.price_fetched_at ?? new Date().toISOString(),
         is_cached: h.is_price_cached,
+        // baseline 데이터는 캐시로 처리 (MarketPriceItem.source 요구사항 충족)
+        source: (h.price_source === 'realtime' ? 'realtime' : 'cached') as 'realtime' | 'cached',
       }));
 
     handleSnapshotRefresh(currentPrices, exchangeRate.rate, (snapshot) => {
@@ -175,7 +178,9 @@ export function DashboardScreen() {
     // 섹터 보정 후 대시보드 리프레시 (필요 시)
   }, []);
 
-  // ── 초기 로딩 화면 (마운트 최초 1회만) ──
+  // ── 초기 로딩 화면 (baseline 완료 전, 마운트 최초 1회만) ──
+  // baseline이 완료되면 initialLoading = false로 전환되어 이 스피너가 해제된다.
+  // 이후 실시간 갱신 중임은 priceUpdating 인디케이터로 표시한다.
   if (initialLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -205,6 +210,13 @@ export function DashboardScreen() {
               USD/KRW {exchangeRate.rate.toLocaleString('ko-KR')}원
               {exchangeRate.is_cached ? ' (캐시)' : ''}
             </Text>
+          )}
+          {/* 실시간 현재가 점진 갱신 중 인디케이터 */}
+          {priceUpdating && (
+            <View style={styles.priceUpdatingRow}>
+              <ActivityIndicator size="small" color="#003ec7" style={styles.priceUpdatingSpinner} />
+              <Text style={styles.priceUpdatingText}>현재가 갱신 중...</Text>
+            </View>
           )}
         </View>
         <TouchableOpacity onPress={handleLogout}>
@@ -292,7 +304,7 @@ export function DashboardScreen() {
                     onPress={() => handleHoldingPress(item)}
                     activeOpacity={0.95}
                   >
-                    <HoldingCard data={item} />
+                    <HoldingCard data={item} priceUpdating={priceUpdating} />
                   </TouchableOpacity>
                 ))}
               </View>
@@ -393,6 +405,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#737688',
     marginTop: 2,
+  },
+  priceUpdatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  priceUpdatingSpinner: {
+    marginRight: 4,
+  },
+  priceUpdatingText: {
+    fontSize: 11,
+    color: '#003ec7',
+    fontWeight: '500',
   },
   // ── 스크롤 ──
   scroll: {

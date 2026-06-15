@@ -20,6 +20,14 @@ interface PriceResult {
   currency: string;
   fetched_at: string;
   is_cached: boolean;
+  /** 'realtime': 외부 API 성공, 'cached': 내부 캐시 사용 */
+  source: 'realtime' | 'cached';
+}
+
+interface FailedResult {
+  ticker: string;
+  asset_type: AssetType;
+  reason: string;
 }
 
 // 메모리 캐시 (Edge Function 인스턴스 수명 내에서만 유효)
@@ -190,7 +198,7 @@ serve(async (req: Request) => {
     );
   }
 
-  let body: { tickers?: TickerRequest[] };
+  let body: { tickers?: TickerRequest[]; chunk_index?: number };
   try {
     body = await req.json();
   } catch {
@@ -200,7 +208,7 @@ serve(async (req: Request) => {
     );
   }
 
-  const { tickers } = body;
+  const { tickers, chunk_index = 0 } = body;
   if (!Array.isArray(tickers) || tickers.length === 0) {
     return new Response(
       JSON.stringify({ error: { code: '400', message: 'tickers 배열이 비어 있거나 형식이 올바르지 않습니다.' } }),
@@ -208,11 +216,28 @@ serve(async (req: Request) => {
     );
   }
 
+  // 미국주식 8개 초과 검증
+  const usStockCount = tickers.filter((t) => t.asset_type === 'us_stock').length;
+  if (usStockCount > 8) {
+    return new Response(
+      JSON.stringify({
+        error: {
+          code: '400',
+          message: `us_stock 종목이 ${usStockCount}개로 최대 8개를 초과합니다. 청크를 분할하여 호출하세요.`,
+        },
+      }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    );
+  }
+
+  console.log(`[get-market-prices] chunk_index=${chunk_index} tickers=${tickers.length}개 (us_stock=${usStockCount}개)`);
+
   const twelveDataApiKey = Deno.env.get('TWELVE_DATA_API_KEY') ?? '';
   const coinGeckoApiKey = Deno.env.get('COINGECKO_API_KEY') ?? '';
 
   // 캐시에서 먼저 확인
   const prices: PriceResult[] = [];
+  const failed: FailedResult[] = [];
   const needFetchUs: TickerRequest[] = [];
   const needFetchKr: TickerRequest[] = [];
   const needFetchCrypto: TickerRequest[] = [];
@@ -228,6 +253,7 @@ serve(async (req: Request) => {
         currency: cached.currency,
         fetched_at: cached.fetched_at,
         is_cached: true,
+        source: 'cached',
       });
     } else if (t.asset_type === 'crypto') {
       needFetchCrypto.push(t);
@@ -238,7 +264,7 @@ serve(async (req: Request) => {
     }
   }
 
-  // 조회 성공 시 캐시 갱신, 실패 시 만료된 캐시 값으로 대체
+  // 조회 성공 시 캐시 갱신, 실패 시 만료된 캐시 값으로 대체하거나 failed에 추가
   async function fetchAndMerge(
     reqs: TickerRequest[],
     fetcher: (reqs: TickerRequest[]) => Promise<Map<string, { price: number; currency: string; fetched_at: string }>>,
@@ -246,10 +272,12 @@ serve(async (req: Request) => {
   ) {
     if (reqs.length === 0) return;
     let fetched = new Map<string, { price: number; currency: string; fetched_at: string }>();
+    let fetchError: string | null = null;
     try {
       fetched = await fetcher(reqs);
     } catch (err) {
-      console.error(`${label} 오류:`, err);
+      fetchError = err instanceof Error ? err.message : String(err);
+      console.error(`[get-market-prices] ${label} 오류:`, err);
     }
     for (const t of reqs) {
       const entry = fetched.get(t.ticker);
@@ -264,17 +292,29 @@ serve(async (req: Request) => {
           currency: entry.currency,
           fetched_at: entry.fetched_at,
           is_cached: false,
+          source: 'realtime',
         });
       } else {
-        const cached = priceCache.get(cacheKey);
-        if (cached) {
+        // 만료된 캐시라도 있으면 사용 (source: 'cached')
+        const stale = priceCache.get(cacheKey);
+        if (stale) {
           prices.push({
             ticker: t.ticker,
             asset_type: t.asset_type,
-            price: cached.price,
-            currency: cached.currency,
-            fetched_at: cached.fetched_at,
+            price: stale.price,
+            currency: stale.currency,
+            fetched_at: stale.fetched_at,
             is_cached: true,
+            source: 'cached',
+          });
+        } else {
+          // 캐시도 없으면 failed에 추가
+          failed.push({
+            ticker: t.ticker,
+            asset_type: t.asset_type,
+            reason: fetchError
+              ? `${label} 조회 실패: ${fetchError}`
+              : `${label} 응답에 ${t.ticker} 누락`,
           });
         }
       }
@@ -282,13 +322,21 @@ serve(async (req: Request) => {
   }
 
   await Promise.all([
-    fetchAndMerge(needFetchUs, (reqs) => fetchStockPrices(reqs, twelveDataApiKey), 'Twelve Data API'),
-    fetchAndMerge(needFetchKr, (reqs) => fetchKoreanStockPrices(reqs), '네이버 폴링 API'),
-    fetchAndMerge(needFetchCrypto, (reqs) => fetchCryptoPrices(reqs, coinGeckoApiKey), 'CoinGecko API'),
+    fetchAndMerge(needFetchUs, (reqs) => fetchStockPrices(reqs, twelveDataApiKey), 'Twelve Data API').catch((err) => {
+      console.error('[get-market-prices] fetchAndMerge(us) 예상치 못한 오류:', err);
+    }),
+    fetchAndMerge(needFetchKr, (reqs) => fetchKoreanStockPrices(reqs), '네이버 폴링 API').catch((err) => {
+      console.error('[get-market-prices] fetchAndMerge(kr) 예상치 못한 오류:', err);
+    }),
+    fetchAndMerge(needFetchCrypto, (reqs) => fetchCryptoPrices(reqs, coinGeckoApiKey), 'CoinGecko API').catch((err) => {
+      console.error('[get-market-prices] fetchAndMerge(crypto) 예상치 못한 오류:', err);
+    }),
   ]);
 
+  console.log(`[get-market-prices] chunk_index=${chunk_index} 완료: prices=${prices.length}개, failed=${failed.length}개`);
+
   return new Response(
-    JSON.stringify({ prices }),
+    JSON.stringify({ prices, failed }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   );
 });

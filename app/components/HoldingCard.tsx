@@ -43,9 +43,11 @@ function formatOrigPrice(value: number, currency: string): string {
 
 interface HoldingCardProps {
   data: HoldingCardData;
+  /** 실시간 현재가 청크 갱신이 진행 중인지 여부. baseline 표시 문구 제어에 사용. */
+  priceUpdating?: boolean;
 }
 
-export const HoldingCard = memo(function HoldingCard({ data }: HoldingCardProps) {
+export const HoldingCard = memo(function HoldingCard({ data, priceUpdating = false }: HoldingCardProps) {
   const badge = ASSET_TYPE_BADGE[data.asset_type];
   const isKrw = data.asset_type === 'korean_stock';
   const isProfitable = data.profit_rate !== null && data.profit_rate >= 0;
@@ -145,8 +147,18 @@ export const HoldingCard = memo(function HoldingCard({ data }: HoldingCardProps)
         </View>
       </View>
 
-      {/* 캐시 데이터 경고 */}
-      {data.is_price_cached && data.price_fetched_at && (
+      {/* 가격 출처 안내 */}
+      {data.price_source === 'baseline' && data.price_fetched_at && (
+        <Text style={styles.cachedNote}>
+          * 저장 종가 기준 (
+          {new Date(data.price_fetched_at).toLocaleDateString('ko-KR', {
+            month: 'numeric',
+            day: 'numeric',
+          })}
+          ){priceUpdating ? ' — 실시간 갱신 중' : ''}
+        </Text>
+      )}
+      {data.price_source === 'cached' && data.price_fetched_at && (
         <Text style={styles.cachedNote}>
           * 캐시 데이터 기준 (
           {new Date(data.price_fetched_at).toLocaleTimeString('ko-KR', {

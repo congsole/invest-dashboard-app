@@ -104,10 +104,20 @@ export interface MarketPriceItem {
   currency: string;
   fetched_at: string;
   is_cached: boolean;
+  /** 'realtime': 외부 API 성공, 'cached': 내부 캐시 사용 */
+  source: 'realtime' | 'cached';
+}
+
+export interface MarketPriceFailedItem {
+  ticker: string;
+  asset_type: AssetType;
+  reason: string;
 }
 
 export interface MarketPricesResponse {
   prices: MarketPriceItem[];
+  /** 조회 실패 종목 목록. 부분 실패 시에도 HTTP 200으로 반환됨. */
+  failed: MarketPriceFailedItem[];
 }
 
 // ────────────────────────────────────────────
@@ -141,6 +151,14 @@ export interface HoldingCardData {
   profit_amount: number | null;  // 평가손익 (원화)
   is_price_cached: boolean;
   price_fetched_at: string | null;
+  /**
+   * 현재가 출처.
+   * - 'baseline': prices 테이블 저장 종가 (EOD)
+   * - 'realtime': 외부 API 실시간 조회 성공
+   * - 'cached': Edge Function 내부 캐시 사용
+   * - null: 현재가 없음
+   */
+  price_source: 'baseline' | 'realtime' | 'cached' | null;
 }
 
 // ────────────────────────────────────────────
