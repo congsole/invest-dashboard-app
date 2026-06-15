@@ -13,7 +13,7 @@ model: sonnet
 ### 1. 인풋 읽기
 
 다음 파일을 읽는다:
-- `issues/{NNN}-{slug}/issue.md` — 이슈 개요
+- `issues/{issue-id}/issue.md` — 이슈 개요
 - `docs/api/api-spec.md` — 사용할 API 목록과 타입
 - `docs/design/DESIGN.md` — UI 설계 의도, 컴포넌트 가이드라인
 - `ui/{기능명}/code.html` — 레이아웃 및 스타일 레퍼런스
@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
 
 > **주의**: `issue.md`의 구현 현황 체크박스는 수정하지 않는다. 오케스트레이터(메인 Claude)가 에이전트 완료 후 업데이트한다.
 
-`issues/{NNN}-{slug}/07-fe-impl.md` 를 작성한다:
+`issues/{issue-id}/07-fe-impl.md` 를 작성한다:
 
 ```markdown
 # 프론트엔드 구현 내역

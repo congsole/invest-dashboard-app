@@ -39,7 +39,7 @@ invest-dashboard/
 │   └── {기능명}/
 │       └── code.html
 ├── issues/
-│   └── {NNN}-{issue-title}/
+│   └── {YYYYMMDD}-{issue-title}/   # 이슈 ID = 트리거 커밋 날짜 + slug (브랜치 병합 시 번호 충돌 방지)
 │       ├── issue.md          # 이슈 정의 + docs 변경 내역
 │       ├── 04-supabase-impl.md   # BE 트랙: Supabase 구현 내역
 │       ├── 05-be-review.md       # BE 트랙: 백엔드 코드 리뷰
@@ -98,7 +98,7 @@ invest-dashboard/
         │
         ▼ [2] 이슈 생성 (완성된 설계 기반으로 판단, docs 변경 내역 issue.md에 기록)
     pm-agent
-    └─ issues/{NNN}-{title}/issue.md 생성 (이슈 번호 auto-increment)
+    └─ issues/{YYYYMMDD}-{title}/issue.md 생성 (이슈 ID = 커밋 날짜 + slug)
         │
         ▼ [3] 구현 — n+1 병렬 (BE 순차 1 + FE 병렬 n), resume 지원
   ┌──────────────────────────────┐  ┌─────────────────────┐
@@ -118,7 +118,7 @@ invest-dashboard/
         │ 모든 트랙 합격 후
         │
         ▼ [4] 수동 테스트 시나리오 작성 (오케스트레이터 직접) → 파이프라인 종료
-  issues/{NNN}/09-manual-test.md 생성
+  issues/{issue-id}/09-manual-test.md 생성
   + docs/testing/manual-test-scenarios.md 갱신
         │
         ▼ [5] 수동 테스트 (개발자 직접 수행 — 자동화 없음)
@@ -138,7 +138,7 @@ issue.md의 구현 현황 체크박스(`[x]` / `[ ]`)를 보고 완료된 단계
 
 #### 수동 테스트
 E2E 자동화(Maestro)는 폐기했다. 대신:
-- FE 트랙 합격 후 오케스트레이터가 `issues/{NNN}/09-manual-test.md`에 테스트 시나리오를 작성한다
+- FE 트랙 합격 후 오케스트레이터가 `issues/{issue-id}/09-manual-test.md`에 테스트 시나리오를 작성한다
 - 시나리오는 각각 **사전 조건 / 단계 / 기대 결과**로 구성하고, 해당 이슈의 변경 범위 + 인접 기능 회귀를 포함한다
 - 전체 기능 회귀 시나리오는 `docs/testing/manual-test-scenarios.md`에 누적 관리한다 (FE 변경 이슈마다 갱신)
 - 개발자가 시뮬레이터에서 직접 수행하고, 완료 시 issue.md의 `- [ ] 수동 테스트`를 체크한다
@@ -155,7 +155,7 @@ E2E 자동화(Maestro)는 폐기했다. 대신:
 git config core.hooksPath .claude/hooks
 ```
 
-동시 실행 방지: `.claude/pipeline.lock/` 디렉토리 락. 파이프라인 실행 중 새 docs 커밋이 들어오면 건너뛰고 알림만 보낸다 (완료 후 `resume-pipeline.sh`로 재개). 동시 실행 시 이슈 번호 채번 레이스, status log 덮어쓰기, `supabase db push` 충돌이 발생하기 때문. 프로세스가 죽어 남은 stale 락은 PID 검사로 자동 회수된다.
+동시 실행 방지: `.claude/pipeline.lock/` 디렉토리 락. 파이프라인 실행 중 새 docs 커밋이 들어오면 건너뛰고 알림만 보낸다 (완료 후 `resume-pipeline.sh`로 재개). 동시 실행 시 status log 덮어쓰기, `supabase db push` 충돌이 발생하기 때문. 프로세스가 죽어 남은 stale 락은 PID 검사로 자동 회수된다.
 
 ```
 git commit (docs/planning/ 또는 docs/design/ 변경)
@@ -187,8 +187,8 @@ echo "[$(date +%H:%M:%S)] {메시지}" >> logs/pipeline-status.log
 ```
 - 파이프라인: `── 파이프라인 시작 ({해시7자리})` / `── 파이프라인 완료 ✅` / `── 파이프라인 실패 ❌`
 - 설계: `[설계] {agent-name} 시작` / `[설계] {agent-name} ✅`
-- PM: `[PM] 이슈 생성 시작` / `[PM] 이슈 {N}개 생성: {번호들}` / `[PM] 이슈 없음 — 종료`
-- 구현: `[{이슈번호}/{BE|FE}] {agent-name} 시작` / `✅` / `❌ ({사유})` / `❌ ({N}/3) 재수정 중`
+- PM: `[PM] 이슈 생성 시작` / `[PM] 이슈 {N}개 생성: {ID들}` / `[PM] 이슈 없음 — 종료`
+- 구현: `[{슬러그}/{BE|FE}] {agent-name} 시작` / `✅` / `❌ ({사유})` / `❌ ({N}/3) 재수정 중`
 
 서브에이전트에게 이 로그를 쓰라고 지시하지 않는다 — 오케스트레이터가 에이전트 호출 전후에 직접 쓴다.
 
@@ -209,7 +209,7 @@ echo "[$(date +%H:%M:%S)] {메시지}" >> logs/pipeline-status.log
 각 섹션은 단계별 에이전트가 순차적으로 채운다.
 
 ```markdown
-# [{NNN}] {이슈 제목}
+# [{issue-id}] {이슈 제목}
 
 <!-- PM-agent 작성 -->
 ## 개요
@@ -245,7 +245,7 @@ echo "[$(date +%H:%M:%S)] {메시지}" >> logs/pipeline-status.log
 ## 개발 규칙
 - 백엔드 구현은 Supabase 단일 사용 (SQL 쿼리, RLS 정책, Edge Function)
 - 별도 서버 추가 시 `server/` 디렉토리 생성
-- 이슈 번호는 `issues/` 폴더 스캔 후 auto-increment
+- 이슈 ID는 `{YYYYMMDD}-{slug}` (트리거 커밋 날짜 + slug). 폴더 스캔 max+1 방식은 폐기 — 여러 feature 브랜치 병합 시 번호가 충돌하기 때문. 기존 3자리 번호 이슈는 그대로 둔다
 
 ### 백엔드 테스트는 로컬 Supabase 대상 (운영 DB 격리)
 - Jest 통합 테스트는 **로컬 Supabase**(Docker, `supabase start`)를 대상으로 실행한다 — `app/.env.test`가 `http://127.0.0.1:54321`과 CLI 공개 데모 키를 가리킨다

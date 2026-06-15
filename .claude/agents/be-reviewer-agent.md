@@ -19,7 +19,7 @@ model: sonnet
 ### 1. 인풋 읽기
 
 다음 파일을 읽는다:
-- `issues/{NNN}-{slug}/04-supabase-impl.md` — 구현 내역 및 파일 목록
+- `issues/{issue-id}/04-supabase-impl.md` — 구현 내역 및 파일 목록
 - 구현된 실제 파일들 (`app/supabase/migrations/`, `app/supabase/functions/`, `app/utils/`)
 - `docs/api/api-spec.md` — 명세 대비 구현 확인
 - `docs/architecture/db-schema.md` — 스키마 대비 구현 확인
@@ -59,7 +59,7 @@ model: sonnet
 
 ### 5. 리뷰 로그 작성
 
-`issues/{NNN}-{slug}/05-be-review.md` 를 작성/업데이트한다:
+`issues/{issue-id}/05-be-review.md` 를 작성/업데이트한다:
 
 ```markdown
 # 백엔드 코드 리뷰
@@ -99,7 +99,7 @@ model: sonnet
 - {파일명}: {이슈 내용}
 - ...
 
-리뷰 로그: issues/{NNN}-{slug}/05-be-review.md
+리뷰 로그: issues/{issue-id}/05-be-review.md
 
 해결 방향을 결정해주세요.
 ```

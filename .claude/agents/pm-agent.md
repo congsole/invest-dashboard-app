@@ -56,23 +56,24 @@ model: sonnet
 
 분리된 이슈 간 의존성이 있으면 선행 이슈 번호를 issue.md 참조 문서 섹션에 명시한다.
 
-### 3. 이슈 번호 결정
+### 3. 이슈 ID 결정
 
-`issues/` 폴더를 스캔하여 기존 이슈 번호 중 가장 큰 값을 찾고 +1부터 순서대로 부여한다.
-- 폴더가 없거나 비어있으면 001부터 시작
-- 번호는 3자리 zero-padding (001, 002, ..., 042, ...)
-- 여러 이슈 생성 시 번호를 연속으로 부여 (예: 003, 004)
+이슈 ID는 `{YYYYMMDD}-{title-slug}` 형식으로 부여한다 (예: `20260615-user-authentication`).
+- 날짜는 **트리거 커밋의 커밋 날짜**를 쓴다: `git show -s --format=%cd --date=format:%Y%m%d {commit-hash}`
+- 폴더 스캔으로 번호를 증가시키지 **않는다** — 여러 feature 브랜치를 병행 작업 후 병합할 때 `max+1` 채번이 충돌하던 문제를 막기 위함이다 (브랜치 간 조율 없이 전역 유일).
+- 같은 커밋에서 여러 이슈가 나오면 날짜는 공유하고 slug로 구분된다.
+- 기존 3자리 번호(001~028 등) 이슈는 그대로 두고 변경하지 않는다 — 신규 이슈부터 날짜 prefix를 적용한다.
 
 ### 4. 이슈 디렉토리 및 문서 생성
 
-이슈별로 `issues/{NNN}-{title-slug}/issue.md` 를 생성한다.
+이슈별로 `issues/{issue-id}/issue.md` 를 생성한다 (issue-id = `{YYYYMMDD}-{title-slug}`).
 - title-slug: 이슈 제목을 영문 소문자 + hyphen으로 변환 (예: `user-authentication`)
 - 한국어 제목인 경우 의미에 맞게 영문 slug 생성
 
 아래 형식을 **정확히** 따라 issue.md 를 작성한다:
 
 ```markdown
-# [{NNN}] {이슈 제목}
+# [{issue-id}] {이슈 제목}
 
 <!-- PM-agent 작성 -->
 ## 개요
@@ -116,7 +117,7 @@ git diff HEAD docs/api/api-spec.md
 
 - 이슈가 0개면: "개발 이슈 없음 — 이슈 생성 생략" 출력 후 종료
 - 이슈가 1개 이상이면:
-  - 각 `issues/{NNN}-{slug}/issue.md` 파일 생성 완료
+  - 각 `issues/{issue-id}/issue.md` 파일 생성 완료
   - 개요와 참조 문서 섹션이 채워져 있음
   - 이후 에이전트가 채울 섹션은 placeholder 텍스트만 있음
-  - 완료 후 생성된 이슈 목록 (번호, 제목, 경로) 출력
+  - 완료 후 생성된 이슈 목록 (ID, 제목, 경로) 출력
