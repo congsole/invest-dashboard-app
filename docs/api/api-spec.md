@@ -1,6 +1,6 @@
 # API Spec
 
-*최종 업데이트: 30af926 — 2026-06-15*
+*최종 업데이트: eabdfae — 2026-06-15*
 
 ## 공통
 
@@ -881,18 +881,77 @@ Array<{
 
 ## Market (외부 시장 데이터 — Edge Function)
 
-### 현재가 조회
+> **현재가 로딩 전략 개요**
+>
+> 대시보드 진입·새로고침 시 현재가는 두 단계로 표시된다.
+> 1. **즉시 표시 (baseline)**: `prices` 테이블의 종목별 최신 종가(EOD)를 먼저 읽어 카드/KPI를 즉시 렌더링한다. 화면 전체를 스피너로 비우지 않는다.
+> 2. **실시간 점진 갱신**: 이어서 `get-market-prices` Edge Function을 호출하여 실시간 현재가를 조회한다. 종목별로 도착하는 대로 카드/KPI를 갱신한다.
+>    - Twelve Data 무료 플랜은 분당 8크레딧(심볼 1개 = 1크레딧) 제약 → **미국주식은 8개씩 청크로 나눠 순차 호출, 청크 사이 약 60초 대기**.
+>    - 한국주식(네이버)·코인(CoinGecko)은 해당 제약이 없어 **첫 청크에 함께 조회**.
+>    - 실패 종목은 baseline 저장 종가를 유지하고 갱신 시각을 표시한다.
+> 3. **자동 폴링 없음** — 화면 진입 1회 + 사용자 새로고침마다 1회.
 
-한국 주식·미국 주식은 Twelve Data, 코인은 CoinGecko API를 호출하여 현재가를 반환한다. API 키는 Edge Function 내부에서 관리한다.
+---
+
+### 저장 종가 baseline 조회
+
+`prices` 테이블에서 보유 종목별 최신 종가(EOD)를 읽어 즉시 렌더링에 사용한다. 화면 진입 시 실시간 조회 전에 먼저 호출하여 카드/KPI에 잠정치를 채운다. 이 값은 전 거래일 종가 기준이며 갱신 시각(`date`)과 함께 표시한다.
+
+- **방식**: REST (auto-generated)
+- **호출**: `supabase.from('prices').select('ticker, asset_type, date, close, currency, updated_at').in('ticker', tickers).order('date', { ascending: false })`
+- **인증**: 필요
+
+> 클라이언트에서 `ticker + asset_type` 복합 키로 그룹화하여 각 종목의 가장 최신 행(date MAX)만 사용한다.
+
+**요청 파라미터 (쿼리)**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| tickers | string[] | Y | 보유 종목 ticker 배열. `.in('ticker', tickers)` 로 필터. |
+| asset_type | `'korean_stock' \| 'us_stock' \| 'crypto'` | N | 자산 유형 필터. 복수 자산 유형이 섞인 경우 생략하고 클라이언트에서 분기 처리. |
+
+**응답**
+```typescript
+Array<{
+  ticker: string
+  asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+  date: string                  // YYYY-MM-DD (종가 날짜, 전 거래일)
+  close: number                 // 종가
+  currency: string              // 'KRW' | 'USD' 등
+  updated_at: string            // 갱신 시각 (ISO 8601)
+}>
+// 동일 ticker+asset_type에 여러 날짜 행이 반환될 수 있으므로 클라이언트에서 date MAX 행만 사용
+```
+
+**에러 케이스**
+| 코드 | 상황 |
+|------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+
+---
+
+### 실시간 현재가 조회 (Edge Function)
+
+보유 종목의 실시간 현재가를 외부 API(Twelve Data / 네이버 / CoinGecko)로 조회한다. Twelve Data 분당 8크레딧 제약으로 인해 클라이언트가 청크 단위로 분할 호출한다. API 키는 Edge Function 내부에서 관리한다.
+
+**청크 분할 호출 전략 (클라이언트 책임)**
+
+| 자산 유형 | 외부 API | 크레딧 제약 | 청크 규칙 |
+|-----------|----------|------------|----------|
+| 미국주식 (`us_stock`) | Twelve Data | 분당 8크레딧 | 8개씩 청크 분할, 청크 사이 60초 대기 |
+| 한국주식 (`korean_stock`) | 네이버 | 없음 | 첫 청크에 미국주식 8개와 함께 전송 가능 |
+| 코인 (`crypto`) | CoinGecko | 없음 | 첫 청크에 미국주식 8개와 함께 전송 가능 |
+
+> 첫 청크: 한국주식 전체 + 코인 전체 + 미국주식 최대 8개. 미국주식 9개 이상이면 잔여분을 60초 간격으로 순차 호출.
 
 - **방식**: RPC (Edge Function)
-- **호출**: `supabase.functions.invoke('get-market-prices', { body: { tickers } })`
+- **호출**: `supabase.functions.invoke('get-market-prices', { body: { tickers, chunk_index } })`
 - **인증**: 필요 — `supabase.functions.invoke`가 JWT를 Authorization 헤더에 자동 포함. Edge Function 내부에서 `jose` 라이브러리로 ES256 서명 검증 (Supabase JWKS 엔드포인트 사용). 외부 API 호출 시 JWT 미전달.
 
 **요청 파라미터**
 | 파라미터 | 타입 | 필수 | 설명 |
 |---------|------|------|------|
-| tickers | Array<{ ticker: string; asset_type: 'korean_stock' \| 'us_stock' \| 'crypto' }> | Y | 조회할 종목 목록 |
+| tickers | Array<{ ticker: string; asset_type: 'korean_stock' \| 'us_stock' \| 'crypto' }> | Y | 이번 청크에서 조회할 종목 목록. 미국주식은 최대 8개. |
+| chunk_index | number | N | 0-based 청크 번호 (로깅용, 기본 0). |
 
 **응답**
 ```typescript
@@ -903,17 +962,26 @@ Array<{
     price: number
     currency: string              // 'KRW' | 'USD' | 코인티커
     fetched_at: string            // 데이터 수신 시각 (ISO 8601)
-    is_cached: boolean            // 캐시 데이터 여부
+    is_cached: boolean            // Edge Function 내부 캐시 데이터 여부
+    source: 'realtime' | 'cached' // 'realtime': 외부 API 성공, 'cached': 내부 캐시 사용
   }>
+  failed: Array<{
+    ticker: string
+    asset_type: 'korean_stock' | 'us_stock' | 'crypto'
+    reason: string                // 실패 사유
+  }>
+  // failed 종목은 클라이언트가 prices 테이블의 baseline 저장 종가를 유지한다 (빈칸으로 두지 않음)
 }
 ```
+
+> 부분 실패 시에도 HTTP 200으로 반환한다. `failed` 배열에 실패 종목이 포함되며, 클라이언트는 해당 종목의 값을 baseline 저장 종가로 유지한다.
 
 **에러 케이스**
 | 코드 | 상황 |
 |------|------|
-| 400 | tickers 배열이 비어 있거나 형식 오류 |
+| 400 | tickers 배열이 비어 있거나 형식 오류. us_stock 종목이 8개를 초과. |
 | 401 | 인증 토큰 없음 또는 만료 |
-| 502 | 외부 API(Twelve Data / CoinGecko) 호출 실패 (캐시 값으로 대체 시 is_cached: true) |
+| 502 | 외부 API 전체 실패 (prices 배열이 빈 경우) |
 
 ---
 
@@ -965,8 +1033,11 @@ ExchangeRate-API를 호출하여 USD/KRW 환율을 반환한다. 1시간 캐시.
 - 코인: KST 00:05 (자정 직후, daily_snapshots cron 전)
 
 **동작**
-1. `account_events`에서 사용자별 보유 중인 ticker 목록 추출
-2. 외부 API(Twelve Data / CoinGecko)에서 해당일 종가 수집
+1. `account_events`에서 사용자별 보유 중인 ticker 목록 추출 (중복 제거)
+2. 외부 API에서 해당일 종가 수집:
+   - 한국주식: 네이버 (제약 없음, 전체 일괄 조회)
+   - 코인: CoinGecko (제약 없음, 전체 일괄 조회)
+   - 미국주식: Twelve Data, 분당 8크레딧 제약 → 8개씩 청크 분할 + 청크 사이 60초 대기
 3. `prices` 테이블에 upsert (ticker, asset_type, date 기준 중복 시 무시)
 
 **응답**
@@ -2045,3 +2116,4 @@ null  // 삭제 성공 시 데이터 없음
 | [010] 당일 스냅샷 수동 새로고침 (8a65984) | DailySnapshot — 당일 스냅샷 수동 새로고침 Edge Function(`refresh-today-snapshot`) 신규 추가: current_prices + fx_rate_usd 전달 → account_events 집계 → daily_snapshots upsert → snapshot_refresh_quotas used_count 증가, 갱신 성공 후에만 횟수 차감, 일 3회 초과 시 429 반환(횟수 미차감), 502 실패 시 횟수 미차감. 스냅샷 새로고침 쿼터 조회 REST API 신규 추가(`snapshot_refresh_quotas` SELECT, quota_date=KST 오늘, 행 없으면 used_count=0 처리). |
 | [011] 히스토리 그래프 개편 (322ddfb) | Dashboard — 자산 히스토리 그래프 데이터 수정: (1) 스냅샷 조회를 기간 필터(from/to) 방식에서 전체 기간 1회 조회로 변경 (`period` 파라미터 제거, from/to 파라미터 제거). (2) 집계 단위 전환 개념 명세 추가 (일별/주별/월별/연별 버킷 정의, 버킷 값 = 버킷 내 마지막 스냅샷 값, 버킷팅은 클라이언트 수행). (3) `get_history_markers` RPC 응답 타입 변경: `'withdraw'` 제거 → `'dividend'`만 반환. (4) `principal_krw` 음수 가능 주석 추가. DailySnapshot — 스냅샷 조회(그래프용) 수정: from/to 파라미터 제거, 전체 기간 1회 조회로 변경, `principal_krw` 음수 가능 주석 추가. |
 | [PRD-003 §6.4·§6.5] 메모 측 매매이벤트 연결 경로 구체화 (30af926) | AccountEvent — 계정 이벤트 목록 조회 API 보강: (1) `q` 파라미터 신규 추가 (종목명·티커 ilike 검색, `name.ilike.%q%` OR `ticker.ilike.%q%`). (2) `order` 파라미터 신규 추가 (기본 `event_date.desc`). (3) `event_type` 파라미터 설명에 복수 지정(OR 결합) 및 매매이벤트 선택 모달 호출 패턴(`in.(buy,sell)`) 명시. (4) `ticker` 파라미터 설명을 "정확 매칭"으로 명확화. (5) 매매이벤트 선택 모달용 호출 패턴 3종 추가 (전체 buy/sell 최신순, 종목명/티커 검색 체이닝, 기간 필터 체이닝). Memo 도메인의 `create_memo_with_links`·`update_memo_with_links` `p_trade_event_ids` 파라미터 및 메모 엔티티 연결 추가/해제(memo_trade_events)는 이미 명세 완료 — 변경 없음. |
+| [PRD-002] 미장 가격 조회 원칙 (eabdfae) | Market — (1) 도메인 도입부에 "현재가 로딩 전략 개요" 블록 신규 추가 (baseline 즉시 표시 → 실시간 점진 갱신 → 실패 처리 → 폴링 없음 정책). (2) 저장 종가 baseline 조회 API 신규 추가 (`prices` 테이블 REST 조회, `.in('ticker', tickers)` + date 내림차순, 클라이언트에서 ticker+asset_type 그룹별 MAX date 행 사용). (3) 기존 "현재가 조회" → "실시간 현재가 조회 (Edge Function)"으로 명칭 변경 및 전면 보강: 청크 분할 호출 전략 표 추가(미국주식 8개/청크 60초 대기, 한국주식·코인 첫 청크 동반), `chunk_index` 요청 파라미터 추가, 응답에 `source`(`realtime`/`cached`) 필드 및 `failed` 배열 추가(부분 실패 HTTP 200 반환 + 실패 종목은 클라이언트가 baseline 유지), us_stock 8개 초과 400 에러 추가. (4) 일별 종가 수집 Cron 동작 설명 보강: 미국주식 8개씩 청크 분할 + 60초 대기 명시, 자산 유형별 외부 API·제약 구분. |
