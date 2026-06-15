@@ -100,6 +100,43 @@ export async function deleteAccountEvent(id: string): Promise<void> {
 }
 
 // ────────────────────────────────────────────
+// 매매이벤트 목록 조회 (매매이벤트 선택 모달용)
+// buy/sell 한정, 최신순 고정, 종목명·티커 검색, 기간 필터
+// ────────────────────────────────────────────
+
+export interface TradeEventFilters {
+  q?: string;       // 종목명·티커 ilike 검색
+  from?: string;    // YYYY-MM-DD
+  to?: string;      // YYYY-MM-DD
+}
+
+export async function getTradeEvents(
+  filters?: TradeEventFilters,
+): Promise<AccountEvent[]> {
+  let query = supabase
+    .from('account_events')
+    .select('*')
+    .in('event_type', ['buy', 'sell'])
+    .order('event_date', { ascending: false });
+
+  if (filters?.q && filters.q.trim().length > 0) {
+    const q = filters.q.trim();
+    query = query.or(`name.ilike.%${q}%,ticker.ilike.%${q}%`);
+  }
+  if (filters?.from) {
+    query = query.gte('event_date', filters.from);
+  }
+  if (filters?.to) {
+    query = query.lte('event_date', filters.to);
+  }
+
+  const { data, error } = await query;
+
+  if (error) throw error;
+  return (data ?? []) as AccountEvent[];
+}
+
+// ────────────────────────────────────────────
 // CSV 업로드 미리보기 (parse-account-csv Edge Function)
 // ────────────────────────────────────────────
 

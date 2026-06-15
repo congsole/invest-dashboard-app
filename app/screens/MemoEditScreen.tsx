@@ -2,7 +2,7 @@
  * MemoEditScreen.tsx — 메모 작성/편집 화면
  *
  * - 본문 입력
- * - 엔티티 연결 선택 (종목/섹터/카테고리, 복수 선택)
+ * - 엔티티 연결 선택 (종목/매매이벤트/섹터/카테고리, 복수 선택)
  * - 종목 선택 시 목표가 입력 필드 노출
  * - 생성 모드: memoId === undefined
  * - 편집 모드: memoId가 전달됨 → 상세 조회 후 초기값 설정
@@ -22,6 +22,12 @@
  * - 사용자의 카테고리를 칩으로 나열, 탭하여 선택/해제
  * - "+ 새 카테고리" 버튼 → 인라인 이름 입력 → 즉시 생성 및 선택
  * - 메모 생성/수정 시 p_category_ids 전달
+ *
+ * [026] 매매이벤트 연결 추가:
+ * - "매매이벤트" 행 탭 → TradeEventSelectModal
+ * - buy/sell 이벤트 복수 선택 → 칩 표시
+ * - 편집 모드: 기존 연결 이벤트 로드 후 추가/해제 가능
+ * - 저장 시 p_trade_event_ids 실제 전달 (기존 null 고정 버그 수정)
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -44,6 +50,7 @@ import { MemoStockInput, ENTITY_COLORS } from '../types/memo';
 import { EntityChip } from '../components/EntityChip';
 import { StockSearchModal, SelectedStockInfo } from '../components/StockSearchModal';
 import { CascadingSectorMultiPicker } from '../components/CascadingSectorPicker';
+import { TradeEventSelectModal, SelectedTradeEvent } from '../components/TradeEventSelectModal';
 
 // ────────────────────────────────────────────
 // 연결 종목 상태 (goal_price 포함)
@@ -93,6 +100,9 @@ export function MemoEditScreen({ memoId, userId, onSaved, onDeleted, onBack }: M
   const [newCatSaving, setNewCatSaving] = useState(false);
   const newCatInputRef = useRef<TextInput>(null);
   const [stockModalVisible, setStockModalVisible] = useState(false);
+  // [026] 매매이벤트 연결
+  const [selectedTradeEvents, setSelectedTradeEvents] = useState<SelectedTradeEvent[]>([]);
+  const [tradeEventModalVisible, setTradeEventModalVisible] = useState(false);
 
   // 편집 모드: 기존 데이터 로드
   useEffect(() => {
@@ -129,6 +139,19 @@ export function MemoEditScreen({ memoId, userId, onSaved, onDeleted, onBack }: M
     // [025] memo_categories → category id 배열로 변환
     setSelectedCategoryIds(
       existingMemo.memo_categories.map((mc) => mc.category_id),
+    );
+    // [026] memo_trade_events → SelectedTradeEvent 배열로 변환
+    setSelectedTradeEvents(
+      existingMemo.memo_trade_events.map((mte) => ({
+        id: mte.event_id,
+        event_type: mte.account_events.event_type as 'buy' | 'sell',
+        event_date: mte.account_events.event_date,
+        ticker: mte.account_events.ticker,
+        name: mte.account_events.name,
+        quantity: null,     // MemoDetail에서 quantity는 미포함 — 칩 표시에만 사용
+        price_per_unit: null,
+        currency: '',
+      })),
     );
   }, [existingMemo]);
 
@@ -228,13 +251,16 @@ export function MemoEditScreen({ memoId, userId, onSaved, onDeleted, onBack }: M
       goal_price: s.goal_price ? parseFloat(s.goal_price) : null,
     }));
 
+    // [026] 매매이벤트 id 배열
+    const tradeEventIds = selectedTradeEvents.map((te) => te.id);
+
     if (isEdit && memoId) {
       const result = await update({
         p_memo_id: memoId,
         p_body: trimmedBody,
         p_stocks: stocksInput,
         p_sector_ids: selectedSectorIds,
-        p_trade_event_ids: null, // 수정 시 매매이벤트 연결은 유지
+        p_trade_event_ids: tradeEventIds, // [026] 실제 변경된 id 목록 전달
         p_news_ids: null,
         p_category_ids: selectedCategoryIds, // [025]
       });
@@ -244,11 +270,12 @@ export function MemoEditScreen({ memoId, userId, onSaved, onDeleted, onBack }: M
         p_body: trimmedBody,
         p_stocks: stocksInput,
         p_sector_ids: selectedSectorIds,
+        p_trade_event_ids: tradeEventIds, // [026]
         p_category_ids: selectedCategoryIds, // [025]
       });
       if (result) onSaved();
     }
-  }, [body, selectedStocks, selectedSectorIds, selectedCategoryIds, isEdit, memoId, create, update, onSaved]);
+  }, [body, selectedStocks, selectedSectorIds, selectedCategoryIds, selectedTradeEvents, isEdit, memoId, create, update, onSaved]);
 
   // ── 삭제 ──
   const handleDelete = useCallback(() => {
@@ -359,6 +386,55 @@ export function MemoEditScreen({ memoId, userId, onSaved, onDeleted, onBack }: M
                   </View>
                 </View>
               ))}
+            </View>
+          )}
+        </View>
+
+        {/* [026] 매매이벤트 연결 */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionLabel}>매매이벤트 연결</Text>
+            <TouchableOpacity
+              style={styles.addBtn}
+              onPress={() => setTradeEventModalVisible(true)}
+            >
+              <Text style={styles.addBtnText}>
+                {selectedTradeEvents.length > 0 ? '편집' : '+ 추가'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {selectedTradeEvents.length === 0 ? (
+            <Text style={styles.emptyHint}>연결할 매매이벤트를 추가하세요</Text>
+          ) : (
+            <View style={styles.tradeEventChipList}>
+              {selectedTradeEvents.map((te) => {
+                const isBuy = te.event_type === 'buy';
+                const typeColor = isBuy ? '#22C55E' : '#EF4444';
+                const typeLabel = isBuy ? '매수' : '매도';
+                const stockLabel = te.name ?? te.ticker ?? te.id.slice(0, 6);
+                const dateStr = te.event_date
+                  ? te.event_date.slice(5).replace('-', '/') // MM/DD
+                  : '';
+                return (
+                  <View key={te.id} style={[styles.tradeEventChip, { borderColor: typeColor }]}>
+                    <View style={[styles.tradeEventTypeDot, { backgroundColor: typeColor }]} />
+                    <Text style={[styles.tradeEventChipText, { color: typeColor }]} numberOfLines={1}>
+                      {dateStr ? `${dateStr} · ` : ''}{typeLabel} {stockLabel}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSelectedTradeEvents((prev) =>
+                          prev.filter((e) => e.id !== te.id),
+                        );
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={[styles.tradeEventChipRemove, { color: typeColor }]}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
             </View>
           )}
         </View>
@@ -514,6 +590,15 @@ export function MemoEditScreen({ memoId, userId, onSaved, onDeleted, onBack }: M
         excludeIds={excludeIds}
         onClose={() => setStockModalVisible(false)}
         onSelect={handleStockSelect}
+      />
+
+      {/* [026] 매매이벤트 선택 모달 */}
+      <TradeEventSelectModal
+        visible={tradeEventModalVisible}
+        initialSelectedIds={selectedTradeEvents.map((te) => te.id)}
+        seedQuery={selectedStocks.length > 0 ? selectedStocks[0].name : undefined}
+        onClose={() => setTradeEventModalVisible(false)}
+        onConfirm={(events) => setSelectedTradeEvents(events)}
       />
     </SafeAreaView>
   );
@@ -672,6 +757,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#0b1c30',
+  },
+  // [026] 매매이벤트 연결 스타일
+  tradeEventChipList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tradeEventChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 9999,
+    borderWidth: 1.5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#ffffff',
+    gap: 5,
+    maxWidth: 220,
+  },
+  tradeEventTypeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    flexShrink: 0,
+  },
+  tradeEventChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  tradeEventChipRemove: {
+    fontSize: 11,
+    fontWeight: '700',
+    flexShrink: 0,
   },
   // [025] 카테고리 연결 스타일
   catHint: {
