@@ -45,6 +45,20 @@ function toDateString(isoString: string): string {
   return isoString.slice(0, 10);
 }
 
+// id 기준 중복 제거 (먼저 등장한 항목 유지)
+// offset 페이지네이션 경계에서 같은 메모가 두 페이지에 걸쳐 들어와도
+// FlatList 중복 키 경고가 발생하지 않도록 방어한다.
+function dedupeById(memos: MemoItem[]): MemoItem[] {
+  const seen = new Set<string>();
+  const result: MemoItem[] = [];
+  for (const memo of memos) {
+    if (seen.has(memo.id)) continue;
+    seen.add(memo.id);
+    result.push(memo);
+  }
+  return result;
+}
+
 // 달력형 요약 맵 생성
 function buildCalendarSummary(memos: MemoItem[]): Map<string, DayMemoSummary> {
   const map = new Map<string, DayMemoSummary>();
@@ -154,7 +168,7 @@ export function useMemos(initialParams: ListMemosParams = {}): UseMemosReturn {
         p_offset: offsetRef.current,
       });
       if (!isMounted.current) return;
-      setAllMemos((prev) => [...prev, ...result.memos]);
+      setAllMemos((prev) => dedupeById([...prev, ...result.memos]));
       setTotalCount(result.total_count);
       totalCountRef.current = result.total_count;
       offsetRef.current += result.memos.length;
